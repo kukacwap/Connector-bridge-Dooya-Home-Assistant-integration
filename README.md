@@ -1,5 +1,8 @@
 # Connector Bridge (Dooya) for Home Assistant
 
+[![HACS validation](https://github.com/kukacwap/Connector-bridge-Dooya-Home-Assistant-integration/actions/workflows/hacs.yml/badge.svg)](https://github.com/kukacwap/Connector-bridge-Dooya-Home-Assistant-integration/actions/workflows/hacs.yml)
+[![Hassfest validation](https://github.com/kukacwap/Connector-bridge-Dooya-Home-Assistant-integration/actions/workflows/hassfest.yml/badge.svg)](https://github.com/kukacwap/Connector-bridge-Dooya-Home-Assistant-integration/actions/workflows/hassfest.yml)
+
 A Home Assistant custom integration for **Dooya / Motionblinds DD7002B "Connector" bridges**, exposing paired motorized blinds, curtains, shutters, and awnings as `cover` entities.
 
 Communication happens entirely on your local network over UDP — no cloud account required (`iot_class: local_push`). The integration listens for multicast status pushes from the bridge for real-time updates, and falls back to polling.
