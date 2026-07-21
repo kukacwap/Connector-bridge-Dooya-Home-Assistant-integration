@@ -1,0 +1,21 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connector Bridge beállítása",
+        "description": "Az API kulcsot a Connector+ appban találod: **Beállítások → Névjegy → koppints 5-ször bárhova**.",
+        "data": {
+          "host": "Bridge IP cím",
+          "key": "API kulcs"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Nem sikerült csatlakozni a bridge-hez. Ellenőrizd az IP-t és a kulcsot.",
+      "unknown": "Váratlan hiba. Ellenőrizd a naplót."
+    },
+    "abort": {
+      "already_configured": "Ez a bridge már be van állítva."
+    }
+  }
+}

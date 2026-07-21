@@ -1,0 +1,21 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Connector Bridge",
+        "description": "Find your API key in the Connector+ app: **Settings → About → tap 5 times anywhere**.",
+        "data": {
+          "host": "Bridge IP address",
+          "key": "API key"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to the bridge. Check the IP address and key.",
+      "unknown": "Unexpected error. Check the logs."
+    },
+    "abort": {
+      "already_configured": "This bridge is already configured."
+    }
+  }
+}
