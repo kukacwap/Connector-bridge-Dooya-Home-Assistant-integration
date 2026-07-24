@@ -10,10 +10,13 @@ Communication happens entirely on your local network over UDP — no cloud accou
 ## Features
 
 - Local push and polling updates
-- Open / close / stop
-- Set position (for bi-directional motors that report position)
+- Open / close / stop / set position
+- Position estimation for stateless motors that don't report one, so state
+  shows correctly in HomeKit (configurable travel time per blind)
+- Automatic discovery, and automatic recovery if the bridge's IP changes
+- Gateway connectivity sensor, diagnostics download, and repair notices
 - Auto-detects device class (blind, curtain, shutter, awning, gate) per device type
-- Config flow (UI-based setup, no YAML needed)
+- Config flow (UI-based setup, no YAML needed), plus reconfigure and options flows
 
 ## Supported hardware
 
@@ -46,9 +49,37 @@ Configuration is done entirely through the Home Assistant UI:
 
 The integration will connect to the bridge, discover paired blinds, and add them as `cover` entities.
 
+If the bridge is on your network, its address is discovered automatically and
+pre-filled, so usually only the API key needs entering.
+
+### Blind travel times
+
+Motors that don't report their own position are positioned by running them
+for a calculated time. Time how long a full open (or close) takes, then set
+it per blind under **Configure** on the integration. Without this, position
+estimates and the HomeKit slider will be inaccurate.
+
+### If the bridge IP changes
+
+The integration finds the bridge again by MAC address and updates itself, so
+a DHCP address change is handled automatically. You can also change the
+address manually via **Reconfigure**. Assigning the bridge a static IP or a
+DHCP reservation is still recommended.
+
+## Troubleshooting
+
+- **Gateway connectivity sensor** — a diagnostic entity showing whether the
+  bridge is reachable, when it was last seen, and whether push updates are active.
+- **Diagnostics** — download from the integration page (the API key and
+  network identifiers are redacted) when reporting an issue.
+- **Push updates unavailable** — if a repair notice reports this, multicast
+  traffic isn't reaching Home Assistant. This is common with Docker bridge
+  networking or when the bridge is on another VLAN/subnet; the integration
+  falls back to polling in the meantime.
+
 ## Requirements
 
-- `pycryptodome` (installed automatically as a dependency)
+- `pycryptodomex` (installed automatically as a dependency)
 
 ## Disclaimer
 

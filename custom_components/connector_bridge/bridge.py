@@ -24,7 +24,6 @@ from .const import (
     MULTICAST_ADDRESS,
     OPERATION_CLOSE,
     OPERATION_OPEN,
-    OPERATION_STATUS,
     OPERATION_STOP,
     SOCKET_BUFSIZE,
     UDP_PORT_RECEIVE,
@@ -47,6 +46,48 @@ def _timestamp() -> str:
     """Return current UTC time formatted as HA msgID."""
     now = datetime.datetime.utcnow()
     return now.strftime("%Y%m%d%H%M%S%f")[:-3]
+
+
+def discover_gateways(timeout: float = 5.0) -> dict[str, str]:
+    """Find Connector gateways on the LAN via multicast.
+
+    Returns a ``{mac: ip}`` mapping. Used both for onboarding and to recover
+    the address of a known gateway after its IP has changed.
+    """
+    found: dict[str, str] = {}
+    sock = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        mreq = struct.pack("=4sl", socket.inet_aton(MULTICAST_ADDRESS), socket.INADDR_ANY)
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+        sock.settimeout(timeout)
+        sock.bind(("", UDP_PORT_RECEIVE))
+
+        msg = json.dumps({"msgType": "GetDeviceList", "msgID": _timestamp()}).encode()
+        sock.sendto(msg, (MULTICAST_ADDRESS, UDP_PORT_SEND))
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                data, (ip, _) = sock.recvfrom(SOCKET_BUFSIZE)
+            except socket.timeout:
+                break
+            try:
+                response = json.loads(data)
+            except ValueError:
+                continue
+            if response.get("msgType") != "GetDeviceListAck":
+                continue
+            mac = response.get("mac")
+            if mac:
+                found[mac] = ip
+    except OSError as err:
+        _LOGGER.debug("Gateway discovery failed: %s", err)
+    finally:
+        if sock is not None:
+            sock.close()
+    return found
 
 
 def _compute_access_token(token: str, key: str) -> str:
@@ -205,6 +246,11 @@ class ConnectorGateway:
         self._send_lock = Lock()
         self._last_send = 0.0
 
+        # Connectivity tracking (consumed by the gateway connectivity sensor).
+        self._last_seen: float | None = None
+        self._gateway_callbacks: dict[str, callable] = {}
+        self._multicast_active = False
+
         # Multicast listener
         self._listening = False
         self._mcast_socket: socket.socket | None = None
@@ -229,6 +275,39 @@ class ConnectorGateway:
     # ------------------------------------------------------------------
     # Low-level UDP send/receive
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Connectivity tracking
+    # ------------------------------------------------------------------
+
+    def register_gateway_callback(self, cb_id: str, callback: callable) -> None:
+        """Register a listener notified when gateway connectivity changes."""
+        self._gateway_callbacks[cb_id] = callback
+
+    def remove_gateway_callback(self, cb_id: str) -> None:
+        self._gateway_callbacks.pop(cb_id, None)
+
+    def _fire_gateway_callbacks(self) -> None:
+        for cb in self._gateway_callbacks.values():
+            try:
+                cb()
+            except Exception:
+                _LOGGER.exception("Gateway callback error")
+
+    def _mark_seen(self) -> None:
+        """Record successful contact with the gateway."""
+        changed = not self._available
+        self._available = True
+        self._last_seen = time.time()
+        if changed:
+            self._fire_gateway_callbacks()
+
+    def _mark_unavailable(self) -> None:
+        """Record that the gateway stopped responding."""
+        changed = self._available
+        self._available = False
+        if changed:
+            self._fire_gateway_callbacks()
 
     def _throttle(self) -> None:
         """Space out transmissions so the gateway is never flooded.
@@ -267,9 +346,11 @@ class ConnectorGateway:
                             break
                         s.settimeout(0.2)
 
+                    self._mark_seen()
                     return responses
                 except socket.timeout:
                     if responses:
+                        self._mark_seen()
                         return responses
                     attempt += 1
                     _LOGGER.debug(
@@ -278,7 +359,7 @@ class ConnectorGateway:
                 finally:
                     s.close()
 
-        self._available = False
+        self._mark_unavailable()
         raise TimeoutError(f"No response from bridge at {self._ip} after 3 attempts")
 
     # ------------------------------------------------------------------
@@ -386,11 +467,12 @@ class ConnectorGateway:
             mac = msg.get("mac")
 
             if msgType == "Report" and mac in self._device_list:
+                self._mark_seen()
                 self._device_list[mac].multicast_update(msg)
             elif msgType == "Heartbeat":
-                self._available = True
+                self._mark_seen()
             elif msgType == "GetDeviceListAck":
-                pass  # already handled during setup
+                self._mark_seen()
 
     def start_listening(self) -> None:
         """Start the multicast listener thread."""
@@ -402,15 +484,40 @@ class ConnectorGateway:
         except OSError as err:
             _LOGGER.warning("Cannot open multicast socket (%s); falling back to polling", err)
             self._listening = False
+            self._multicast_active = False
             return
 
         self._mcast_thread = Thread(target=self._multicast_listen, daemon=True)
         self._mcast_thread.start()
+        self._multicast_active = True
         _LOGGER.info("Connector Bridge multicast listener started for %s", self._ip)
+
+    def rediscover(self, timeout: float = 5.0) -> str | None:
+        """Locate this gateway again after its IP changed.
+
+        Returns the new IP if the gateway was found at a different address,
+        otherwise None. The gateway's target address is updated in place.
+        """
+        if not self._mac:
+            return None
+        gateways = discover_gateways(timeout)
+        new_ip = gateways.get(self._mac)
+        if new_ip and new_ip != self._ip:
+            _LOGGER.info(
+                "Connector Bridge %s moved from %s to %s", self._mac, self._ip, new_ip
+            )
+            self._ip = new_ip
+            return new_ip
+        return None
+
+    def set_ip(self, ip: str) -> None:
+        """Point this gateway at a new address."""
+        self._ip = ip
 
     def stop_listening(self) -> None:
         """Stop the multicast listener thread."""
         self._listening = False
+        self._multicast_active = False
         if self._mcast_thread:
             self._mcast_thread.join(timeout=5)
             self._mcast_thread = None
@@ -433,6 +540,21 @@ class ConnectorGateway:
     @property
     def available(self) -> bool:
         return self._available
+
+    @property
+    def device_type(self) -> str | None:
+        """Raw gateway device type code."""
+        return self._device_type
+
+    @property
+    def last_seen(self) -> float | None:
+        """Unix timestamp of the last successful contact, if any."""
+        return self._last_seen
+
+    @property
+    def multicast_active(self) -> bool:
+        """True when the multicast push listener is running."""
+        return self._multicast_active
 
     @property
     def device_list(self) -> dict[str, ConnectorBlind]:

@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import logging
-import socket
-import struct
 
 import voluptuous as vol
 
@@ -12,17 +10,20 @@ from homeassistant import config_entries
 from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers import device_registry as dr
 
-from .bridge import ConnectorGateway
+try:  # Home Assistant 2024.8+
+    from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
+except ImportError:  # pragma: no cover - older cores
+    from homeassistant.components.dhcp import DhcpServiceInfo
+
+from .bridge import ConnectorGateway, discover_gateways
 from .const import (
     CONF_KEY,
     DEFAULT_TIMEOUT,
     DEFAULT_TRAVEL_TIME,
     DOMAIN,
-    MULTICAST_ADDRESS,
     OPT_TRAVEL_TIMES,
-    SOCKET_BUFSIZE,
-    UDP_PORT_SEND,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -35,38 +36,6 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_KEY): str,
     }
 )
-
-
-def _discover_bridge_ip(timeout: float = DISCOVERY_TIMEOUT) -> str | None:
-    """Attempt to discover the bridge IP via multicast."""
-    import datetime
-    import json
-
-    try:
-        mreq = struct.pack("=4sl", socket.inet_aton(MULTICAST_ADDRESS), socket.INADDR_ANY)
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-        sock.settimeout(timeout)
-        sock.bind(("", 32101))
-
-        msg = json.dumps(
-            {"msgType": "GetDeviceList", "msgID": datetime.datetime.utcnow().strftime("%Y%m%d%H%M%S000")}
-        ).encode()
-        sock.sendto(msg, (MULTICAST_ADDRESS, UDP_PORT_SEND))
-
-        data, (ip, _) = sock.recvfrom(SOCKET_BUFSIZE)
-        response = json.loads(data)
-        if response.get("msgType") == "GetDeviceListAck":
-            return ip
-    except Exception:
-        pass
-    finally:
-        try:
-            sock.close()
-        except Exception:
-            pass
-    return None
 
 
 async def _test_connection(
@@ -100,6 +69,9 @@ class ConnectorBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    def __init__(self) -> None:
+        self._discovered_host: str | None = None
+
     @staticmethod
     @callback
     def async_get_options_flow(
@@ -107,6 +79,26 @@ class ConnectorBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> "ConnectorBridgeOptionsFlow":
         """Return the options flow handler."""
         return ConnectorBridgeOptionsFlow()
+
+    async def async_step_dhcp(self, discovery_info: DhcpServiceInfo) -> FlowResult:
+        """Handle a bridge found via DHCP.
+
+        For an already-configured bridge this quietly updates the stored
+        address, which is how the integration follows a changed DHCP lease.
+        """
+        mac = dr.format_mac(discovery_info.macaddress)
+        await self.async_set_unique_id(mac)
+        self._abort_if_unique_id_configured(updates={CONF_HOST: discovery_info.ip})
+
+        # Unknown device: confirm it really is a Connector bridge before
+        # offering it, since the DHCP matcher is deliberately broad.
+        gateways = await self.hass.async_add_executor_job(discover_gateways)
+        if not any(dr.format_mac(found) == mac for found in gateways):
+            return self.async_abort(reason="not_connector_bridge")
+
+        self._discovered_host = discovery_info.ip
+        self.context["title_placeholders"] = {"name": f"Connector Bridge ({discovery_info.ip})"}
+        return await self.async_step_user()
 
     async def async_step_user(self, user_input=None) -> FlowResult:
         """Handle the initial configuration step."""
@@ -122,16 +114,29 @@ class ConnectorBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 # Use the gateway MAC as the unique id so the entry survives
                 # IP changes.
-                await self.async_set_unique_id(mac)
+                await self.async_set_unique_id(dr.format_mac(mac))
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(
                     title=f"Connector Bridge ({host})",
                     data={CONF_HOST: host, CONF_KEY: key},
                 )
 
+            suggested_host = host
+        else:
+            # Offer the bridge's address automatically so onboarding is just
+            # entering the API key.
+            suggested_host = self._discovered_host
+            if suggested_host is None:
+                gateways = await self.hass.async_add_executor_job(
+                    discover_gateways, DISCOVERY_TIMEOUT
+                )
+                suggested_host = next(iter(gateways.values()), "")
+
         return self.async_show_form(
             step_id="user",
-            data_schema=STEP_USER_DATA_SCHEMA,
+            data_schema=self.add_suggested_values_to_schema(
+                STEP_USER_DATA_SCHEMA, {CONF_HOST: suggested_host or ""}
+            ),
             errors=errors,
             description_placeholders={
                 "key_hint": "Settings → About → tap 5× in Connector+ app"
@@ -151,7 +156,8 @@ class ConnectorBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if error:
                 errors["base"] = error
             elif mac and any(
-                other.entry_id != entry.entry_id and other.unique_id == mac
+                other.entry_id != entry.entry_id
+                and other.unique_id == dr.format_mac(mac)
                 for other in self._async_current_entries()
             ):
                 # The supplied address points at a different bridge that is
@@ -161,7 +167,7 @@ class ConnectorBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return self.async_update_reload_and_abort(
                     entry,
                     title=f"Connector Bridge ({host})",
-                    unique_id=mac or entry.unique_id,
+                    unique_id=dr.format_mac(mac) if mac else entry.unique_id,
                     data={CONF_HOST: host, CONF_KEY: key},
                 )
 

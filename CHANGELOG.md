@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.2.0
+
+Resilience and diagnostics.
+
+- **Fixed dependency**: the integration imports `Cryptodome` but declared
+  `pycryptodome` (which provides `Crypto`). It now requires
+  `pycryptodomex`, so a clean install no longer depends on another
+  integration happening to pull that package in.
+- **Automatic IP recovery**: when the bridge stops answering at its stored
+  address it is located again on the network by MAC and the config entry is
+  updated, with a repair issue suggesting a DHCP reservation.
+- **Discovery onboarding**: the bridge is found via DHCP and via multicast,
+  so setup pre-fills the address and only the API key needs entering.
+- **Diagnostics**: download diagnostics from the integration page; the API
+  key and network identifiers are redacted.
+- **Repairs**: an issue is raised when multicast push updates are
+  unavailable and the integration falls back to polling.
+- **Gateway connectivity sensor**: a diagnostic binary sensor reporting
+  whether the bridge is reachable, with last-seen and push-status details.
+- **Human-readable model names** for the gateway and blinds instead of raw
+  device type codes.
+- **HomeKit**: position control is now offered for stateless blinds too
+  (driven for a calculated time), which is what lets HomeKit show a
+  position slider and Hold Position. Cover type now falls back to the
+  device type code, so curtains/awnings report correctly for Siri.
+- Fixed push updates being applied from a non-event-loop thread.
+
 ## 1.1.0
 
 Reflect a usable state for stateless (open/close-only) blinds so they no

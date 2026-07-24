@@ -39,6 +39,35 @@ DEVICE_TYPE_SUNBLIND = "10000011"
 DEVICE_TYPE_WIFI_BLIND = "22000002"
 DEVICE_TYPE_WIFI_CURTAIN = "22000000"
 
+# Human-readable model names shown in the device registry, keyed by the raw
+# deviceType code reported by the gateway.
+DEVICE_TYPE_NAMES = {
+    "02000001": "Connector Bridge (DD7002B)",
+    "02000002": "Connector Bridge",
+    DEVICE_TYPE_BLIND: "Roller Blind",
+    DEVICE_TYPE_TDBU: "Top-Down/Bottom-Up Blind",
+    DEVICE_TYPE_DR: "Double Roller Blind",
+    DEVICE_TYPE_SUNBLIND: "Sunblind",
+    DEVICE_TYPE_WIFI_BLIND: "Wi-Fi Blind",
+    DEVICE_TYPE_WIFI_CURTAIN: "Wi-Fi Curtain",
+}
+
+
+def model_name(device_type: str | None) -> str:
+    """Return a human-readable model name for a raw device type code."""
+    if not device_type:
+        return "Unknown device"
+    return DEVICE_TYPE_NAMES.get(device_type, f"Unknown device ({device_type})")
+
+
+# Repair issue identifiers
+ISSUE_MULTICAST_UNAVAILABLE = "multicast_unavailable"
+ISSUE_IP_CHANGED = "ip_changed"
+
+# Seconds without any gateway contact before the connectivity sensor reports
+# the bridge as disconnected.
+GATEWAY_OFFLINE_AFTER = 300
+
 # Operation codes
 OPERATION_CLOSE = 0
 OPERATION_OPEN = 1

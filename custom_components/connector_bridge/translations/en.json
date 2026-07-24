@@ -1,5 +1,6 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
       "user": {
         "title": "Set up Connector Bridge",
@@ -24,6 +25,7 @@
     },
     "abort": {
       "already_configured": "This bridge is already configured.",
+      "not_connector_bridge": "This device is not a Connector bridge.",
       "reconfigure_successful": "The bridge configuration was updated."
     }
   },
@@ -33,6 +35,16 @@
         "title": "Blind travel times",
         "description": "Full open/close travel time in seconds for each blind (by MAC address). Used to estimate position for motors that don't report one, so the state shows correctly in HomeKit."
       }
+    }
+  },
+  "issues": {
+    "multicast_unavailable": {
+      "title": "Connector Bridge push updates unavailable",
+      "description": "Home Assistant could not open the multicast socket used for real-time updates from the bridge, so it has fallen back to polling. Blind states will update more slowly and changes made with a physical remote may not be detected.\n\nThis usually means multicast traffic is blocked between Home Assistant and the bridge — common when Home Assistant runs in Docker with bridge networking, or when the bridge is on a different VLAN or subnet. Using host networking, or placing both on the same subnet, normally resolves it."
+    },
+    "ip_changed": {
+      "title": "Connector Bridge IP address changed",
+      "description": "The bridge was not reachable at its previous address and was found again at {ip}. Home Assistant has updated the configuration automatically, so no action is required right now.\n\nTo stop this happening again, give the bridge a static IP address or a DHCP reservation in your router."
     }
   }
 }
