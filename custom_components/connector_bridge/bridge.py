@@ -7,7 +7,8 @@ import json
 import logging
 import socket
 import struct
-from threading import Thread
+import time
+from threading import Lock, Thread
 
 from Cryptodome.Cipher import AES
 
@@ -19,6 +20,7 @@ from .const import (
     DEVICE_TYPE_TDBU,
     DEVICE_TYPE_WIFI_BLIND,
     DEVICE_TYPE_WIFI_CURTAIN,
+    MIN_SEND_INTERVAL,
     MULTICAST_ADDRESS,
     OPERATION_CLOSE,
     OPERATION_OPEN,
@@ -186,6 +188,13 @@ class ConnectorGateway:
         self._available = False
         self._device_list: dict[str, ConnectorBlind] = {}
 
+        # Serialize and rate-limit all outbound traffic. The gateway is
+        # single-threaded and drops off the network when it receives
+        # concurrent or back-to-back requests, so every send goes through
+        # this lock and is spaced out by MIN_SEND_INTERVAL.
+        self._send_lock = Lock()
+        self._last_send = 0.0
+
         # Multicast listener
         self._listening = False
         self._mcast_socket: socket.socket | None = None
@@ -211,34 +220,53 @@ class ConnectorGateway:
     # Low-level UDP send/receive
     # ------------------------------------------------------------------
 
+    def _throttle(self) -> None:
+        """Space out transmissions so the gateway is never flooded.
+
+        Must be called while holding ``self._send_lock``.
+        """
+        delta = time.monotonic() - self._last_send
+        if delta < MIN_SEND_INTERVAL:
+            time.sleep(MIN_SEND_INTERVAL - delta)
+        self._last_send = time.monotonic()
+
     def _send(self, message: dict) -> list[dict]:
-        """Send a UDP message and collect all response packets."""
+        """Send a UDP message and collect all response packets.
+
+        All communication is serialized through ``self._send_lock`` and
+        rate-limited via ``_throttle`` so the gateway is never hit by
+        concurrent or back-to-back requests, which causes the DD7002B to
+        drop off the network.
+        """
         raw = json.dumps(message).encode("utf-8")
         responses: list[dict] = []
         attempt = 0
 
-        while attempt < 3:
-            try:
+        with self._send_lock:
+            while attempt < 3:
+                self._throttle()
                 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.settimeout(self._timeout)
-                s.sendto(raw, (self._ip, UDP_PORT_SEND))
+                try:
+                    s.settimeout(self._timeout)
+                    s.sendto(raw, (self._ip, UDP_PORT_SEND))
 
-                while True:
-                    data, _ = s.recvfrom(SOCKET_BUFSIZE)
-                    responses.append(json.loads(data))
-                    if len(data) < int(0.9 * 1024):
-                        break
-                    s.settimeout(0.2)
+                    while True:
+                        data, _ = s.recvfrom(SOCKET_BUFSIZE)
+                        responses.append(json.loads(data))
+                        if len(data) < int(0.9 * 1024):
+                            break
+                        s.settimeout(0.2)
 
-                s.close()
-                return responses
-            except socket.timeout:
-                if responses:
-                    s.close()
                     return responses
-                attempt += 1
-                s.close()
-                _LOGGER.debug("Timeout attempt %d sending %s", attempt, message.get("msgType"))
+                except socket.timeout:
+                    if responses:
+                        return responses
+                    attempt += 1
+                    _LOGGER.debug(
+                        "Timeout attempt %d sending %s", attempt, message.get("msgType")
+                    )
+                finally:
+                    s.close()
 
         self._available = False
         raise TimeoutError(f"No response from bridge at {self._ip} after 3 attempts")

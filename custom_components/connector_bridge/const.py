@@ -8,7 +8,15 @@ CONF_KEY = "key"
 DEFAULT_INTERFACE = "any"
 DEFAULT_TIMEOUT = 5.0
 DEFAULT_MCAST_TIMEOUT = 8.0
-DEFAULT_SCAN_INTERVAL = 30
+# Polling is only a fallback: real-time state arrives via multicast push.
+# The DD7002B gateway is fragile, so keep baseline polling infrequent.
+DEFAULT_SCAN_INTERVAL = 120
+
+# Minimum delay (seconds) between consecutive UDP transmissions to the
+# gateway. The DD7002B is single-threaded and drops off the network when hit
+# with concurrent or back-to-back requests, so all traffic is serialized and
+# spaced out by at least this interval.
+MIN_SEND_INTERVAL = 1.0
 
 MULTICAST_ADDRESS = "238.0.0.18"
 UDP_PORT_SEND = 32100

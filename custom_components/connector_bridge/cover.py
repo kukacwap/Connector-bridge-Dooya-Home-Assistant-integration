@@ -23,6 +23,11 @@ _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(seconds=DEFAULT_SCAN_INTERVAL)
 
+# The gateway cannot handle concurrent requests. Tell Home Assistant to
+# update this platform's entities one at a time instead of in parallel;
+# combined with the gateway-level lock this keeps traffic serialized.
+PARALLEL_UPDATES = 1
+
 BLIND_TYPE_TO_DEVICE_CLASS: dict[int, CoverDeviceClass] = {
     1: CoverDeviceClass.BLIND,
     2: CoverDeviceClass.BLIND,
