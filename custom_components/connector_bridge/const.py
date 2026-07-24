@@ -18,6 +18,11 @@ DEFAULT_SCAN_INTERVAL = 120
 # spaced out by at least this interval.
 MIN_SEND_INTERVAL = 1.0
 
+# Time-based position estimation for stateless (unidirectional) blinds.
+# Option key holding a {mac: seconds} map of full open/close travel times.
+OPT_TRAVEL_TIMES = "travel_times"
+DEFAULT_TRAVEL_TIME = 15.0
+
 MULTICAST_ADDRESS = "238.0.0.18"
 UDP_PORT_SEND = 32100
 UDP_PORT_RECEIVE = 32101

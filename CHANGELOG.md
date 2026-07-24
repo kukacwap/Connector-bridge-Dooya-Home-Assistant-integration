@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.0
+
+Reflect a usable state for stateless (open/close-only) blinds so they no
+longer always appear "closed" in HomeKit.
+
+- Track an optimistic position driven by whatever last triggered the blind
+  (Home Assistant/HomeKit command, automation, or gateway push report)
+- Estimate the position over time from a configurable full travel time, so
+  HomeKit animates the blind toward its target
+- New options flow to set the full open/close travel time per blind
+- Report `assumed_state` and restore the last position across restarts
+- Motors that report a real position continue to use it unchanged
+
 ## 1.0.2
 
 Add a reconfigure flow so the bridge IP or API key can be changed without

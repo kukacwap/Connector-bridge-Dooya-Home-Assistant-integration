@@ -10,15 +10,17 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.const import CONF_HOST
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 
 from .bridge import ConnectorGateway
 from .const import (
     CONF_KEY,
     DEFAULT_TIMEOUT,
+    DEFAULT_TRAVEL_TIME,
     DOMAIN,
     MULTICAST_ADDRESS,
+    OPT_TRAVEL_TIMES,
     SOCKET_BUFSIZE,
     UDP_PORT_SEND,
 )
@@ -98,6 +100,14 @@ class ConnectorBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> "ConnectorBridgeOptionsFlow":
+        """Return the options flow handler."""
+        return ConnectorBridgeOptionsFlow()
+
     async def async_step_user(self, user_input=None) -> FlowResult:
         """Handle the initial configuration step."""
         errors: dict[str, str] = {}
@@ -168,4 +178,31 @@ class ConnectorBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={
                 "key_hint": "Settings → About → tap 5× in Connector+ app"
             },
+        )
+
+
+class ConnectorBridgeOptionsFlow(config_entries.OptionsFlow):
+    """Options flow to set per-blind full open/close travel times."""
+
+    async def async_step_init(self, user_input=None) -> FlowResult:
+        """Configure the travel time (seconds) for each blind."""
+        if user_input is not None:
+            travel_times = {mac: float(value) for mac, value in user_input.items()}
+            return self.async_create_entry(
+                title="", data={OPT_TRAVEL_TIMES: travel_times}
+            )
+
+        gateway = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
+        current: dict = self.config_entry.options.get(OPT_TRAVEL_TIMES, {})
+        macs = list(gateway.device_list) if gateway else list(current)
+
+        schema_dict = {
+            vol.Optional(
+                mac, default=current.get(mac, DEFAULT_TRAVEL_TIME)
+            ): vol.All(vol.Coerce(float), vol.Range(min=1, max=120))
+            for mac in macs
+        }
+
+        return self.async_show_form(
+            step_id="init", data_schema=vol.Schema(schema_dict)
         )

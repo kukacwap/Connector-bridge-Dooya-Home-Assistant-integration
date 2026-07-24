@@ -26,5 +26,13 @@
       "already_configured": "Ez a bridge már be van állítva.",
       "reconfigure_successful": "A bridge beállítása frissült."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Redőny menetidők",
+        "description": "Teljes fel-/lehúzási idő másodpercben minden redőnyhöz (MAC cím szerint). A pozíciót jelenteni nem tudó motoroknál ez alapján becsüljük a pozíciót, hogy a HomeKitben helyesen jelenjen meg az állapot."
+      }
+    }
   }
 }

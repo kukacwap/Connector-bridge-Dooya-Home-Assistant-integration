@@ -26,5 +26,13 @@
       "already_configured": "This bridge is already configured.",
       "reconfigure_successful": "The bridge configuration was updated."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Blind travel times",
+        "description": "Full open/close travel time in seconds for each blind (by MAC address). Used to estimate position for motors that don't report one, so the state shows correctly in HomeKit."
+      }
+    }
   }
 }

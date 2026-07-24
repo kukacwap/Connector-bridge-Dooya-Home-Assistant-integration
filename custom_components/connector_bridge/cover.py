@@ -6,6 +6,7 @@ import logging
 from datetime import timedelta
 
 from homeassistant.components.cover import (
+    ATTR_CURRENT_POSITION,
     ATTR_POSITION,
     CoverDeviceClass,
     CoverEntity,
@@ -15,9 +16,12 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .bridge import ConnectorBlind, ConnectorGateway
-from .const import DEFAULT_SCAN_INTERVAL, DOMAIN
+from .const import DEFAULT_SCAN_INTERVAL, DEFAULT_TRAVEL_TIME, DOMAIN, OPT_TRAVEL_TIMES
+from .travelcalculator import TravelCalculator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,6 +31,9 @@ SCAN_INTERVAL = timedelta(seconds=DEFAULT_SCAN_INTERVAL)
 # update this platform's entities one at a time instead of in parallel;
 # combined with the gateway-level lock this keeps traffic serialized.
 PARALLEL_UPDATES = 1
+
+# How often to refresh the estimated position while a blind is moving.
+_TRAVEL_UPDATE_INTERVAL = timedelta(seconds=1)
 
 BLIND_TYPE_TO_DEVICE_CLASS: dict[int, CoverDeviceClass] = {
     1: CoverDeviceClass.BLIND,
@@ -53,15 +60,28 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     gateway: ConnectorGateway = hass.data[DOMAIN][entry.entry_id]
+    travel_times: dict = entry.options.get(OPT_TRAVEL_TIMES, {})
     entities = [
-        ConnectorBridgeCover(gateway, blind, entry)
+        ConnectorBridgeCover(
+            gateway,
+            blind,
+            entry,
+            float(travel_times.get(blind.mac, DEFAULT_TRAVEL_TIME)),
+        )
         for blind in gateway.device_list.values()
     ]
     async_add_entities(entities, update_before_add=True)
 
 
-class ConnectorBridgeCover(CoverEntity):
-    """Motorized blind via Connector Bridge."""
+class ConnectorBridgeCover(CoverEntity, RestoreEntity):
+    """Motorized blind via Connector Bridge.
+
+    Motors that report a real position use it directly. Open/close-only
+    (stateless) motors have no position feedback, so we estimate one from
+    the configured travel time and treat the entity as assumed-state. The
+    estimate is driven by whatever last triggered the blind — a command from
+    Home Assistant/HomeKit, an automation, or a gateway push report.
+    """
 
     _attr_has_entity_name = True
     _attr_should_poll = True
@@ -71,10 +91,13 @@ class ConnectorBridgeCover(CoverEntity):
         gateway: ConnectorGateway,
         blind: ConnectorBlind,
         entry: ConfigEntry,
+        travel_time: float,
     ) -> None:
         self._gateway = gateway
         self._blind = blind
         self._entry = entry
+        self._travel = TravelCalculator(travel_time)
+        self._unsub_travel = None
 
         self._attr_unique_id = f"{DOMAIN}_{blind.mac}"
         self._attr_name = f"Blind {blind.mac[-4:]}"
@@ -100,14 +123,41 @@ class ConnectorBridgeCover(CoverEntity):
     # ------------------------------------------------------------------
 
     async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
         self._blind.register_callback(self.entity_id, self._on_push_update)
 
+        # Restore the last assumed position across restarts.
+        last_state = await self.async_get_last_state()
+        if last_state is not None:
+            pos = last_state.attributes.get(ATTR_CURRENT_POSITION)
+            if pos is not None:
+                try:
+                    self._travel.set_position(float(pos))
+                except (TypeError, ValueError):
+                    pass
+
     async def async_will_remove_from_hass(self) -> None:
+        self._stop_travel_updates()
         self._blind.remove_callback(self.entity_id)
 
     @callback
     def _on_push_update(self) -> None:
         self._update_position_feature()
+
+        # For stateless blinds, drive the estimate from the reported
+        # operation so externally triggered moves are reflected too.
+        if self._blind.ha_position is None:
+            status = self._blind.operation
+            if status == _OP_OPEN and not self._travel.is_traveling():
+                self._travel.start_travel(100)
+                self._start_travel_updates()
+            elif status == _OP_CLOSE and not self._travel.is_traveling():
+                self._travel.start_travel(0)
+                self._start_travel_updates()
+            elif status == _OP_STOP:
+                self._travel.stop()
+                self._stop_travel_updates()
+
         self.async_write_ha_state()
 
     def _update_position_feature(self) -> None:
@@ -117,8 +167,36 @@ class ConnectorBridgeCover(CoverEntity):
             self._attr_supported_features |= CoverEntityFeature.SET_POSITION
 
     # ------------------------------------------------------------------
+    # Travel animation
+    # ------------------------------------------------------------------
+
+    @callback
+    def _start_travel_updates(self) -> None:
+        if self._unsub_travel is None:
+            self._unsub_travel = async_track_time_interval(
+                self.hass, self._async_travel_tick, _TRAVEL_UPDATE_INTERVAL
+            )
+
+    @callback
+    def _stop_travel_updates(self) -> None:
+        if self._unsub_travel is not None:
+            self._unsub_travel()
+            self._unsub_travel = None
+
+    @callback
+    def _async_travel_tick(self, now) -> None:
+        if self._travel.finalize_if_arrived() or not self._travel.is_traveling():
+            self._stop_travel_updates()
+        self.async_write_ha_state()
+
+    # ------------------------------------------------------------------
     # State
     # ------------------------------------------------------------------
+
+    @property
+    def assumed_state(self) -> bool:
+        """True for stateless blinds whose position we can only estimate."""
+        return self._blind.ha_position is None
 
     @property
     def available(self) -> bool:
@@ -126,56 +204,76 @@ class ConnectorBridgeCover(CoverEntity):
 
     @property
     def current_cover_position(self) -> int | None:
+        """HA convention: 0 = closed, 100 = open.
+
+        Uses the real position when the motor reports one, otherwise the
+        time-based estimate.
         """
-        HA convention: 0 = fully closed, 100 = fully open.
-        Bridge convention: 0 = open, 100 = closed  →  invert here.
-        Returns None only if the blind has never reported a position
-        (unidirectional motor). HomeKit will treat None as 0 (closed).
-        """
-        return self._blind.ha_position
+        real = self._blind.ha_position
+        if real is not None:
+            return real
+        return int(round(self._travel.current_position()))
 
     @property
     def is_closed(self) -> bool | None:
-        pos = self._blind.ha_position
+        pos = self.current_cover_position
         if pos is None:
-            # Unknown state — let HA show as unavailable rather than wrong
             return None
         return pos == 0
 
     @property
     def is_opening(self) -> bool:
-        # operation 1 = Opening; only true while actively moving open
-        return self._blind._status == _OP_OPEN
+        if self._blind.ha_position is not None:
+            return self._blind.operation == _OP_OPEN
+        return self._travel.travel_direction() == 1
 
     @property
     def is_closing(self) -> bool:
-        # operation 0 = Closing; only true while actively moving closed
-        return self._blind._status == _OP_CLOSE
+        if self._blind.ha_position is not None:
+            return self._blind.operation == _OP_CLOSE
+        return self._travel.travel_direction() == -1
 
     @property
     def device_class(self) -> CoverDeviceClass:
-        btype = self._blind._blind_type
-        return BLIND_TYPE_TO_DEVICE_CLASS.get(btype, CoverDeviceClass.BLIND)
+        return BLIND_TYPE_TO_DEVICE_CLASS.get(
+            self._blind.blind_type, CoverDeviceClass.BLIND
+        )
 
     # ------------------------------------------------------------------
     # Commands
     # ------------------------------------------------------------------
 
     async def async_open_cover(self, **kwargs) -> None:
+        if self.assumed_state:
+            self._travel.start_travel(100)
+            self._start_travel_updates()
+            self.async_write_ha_state()
         await self.hass.async_add_executor_job(self._blind.open)
 
     async def async_close_cover(self, **kwargs) -> None:
+        if self.assumed_state:
+            self._travel.start_travel(0)
+            self._start_travel_updates()
+            self.async_write_ha_state()
         await self.hass.async_add_executor_job(self._blind.close)
 
     async def async_stop_cover(self, **kwargs) -> None:
+        if self.assumed_state:
+            self._travel.stop()
+            self._stop_travel_updates()
+            self.async_write_ha_state()
         await self.hass.async_add_executor_job(self._blind.stop)
 
     async def async_set_cover_position(self, **kwargs) -> None:
         """
-        HA sends position 0–100 (0=closed, 100=open).
-        Bridge expects 0–100 (0=open, 100=closed) → invert.
+        HA sends position 0-100 (0=closed, 100=open).
+        Bridge expects 0-100 (0=open, 100=closed) -> invert.
         """
         ha_pos: int = kwargs[ATTR_POSITION]
+        if self.assumed_state:
+            self._travel.start_travel(ha_pos)
+            self._start_travel_updates()
+            self.async_write_ha_state()
         bridge_pos = 100 - ha_pos
         await self.hass.async_add_executor_job(self._blind.set_position, bridge_pos)
 

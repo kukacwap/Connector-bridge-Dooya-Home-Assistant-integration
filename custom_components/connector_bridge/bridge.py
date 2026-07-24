@@ -172,6 +172,16 @@ class ConnectorBlind:
             return None
         return 100 - self._position
 
+    @property
+    def operation(self) -> int | None:
+        """Last reported operation: 0=closing, 1=opening, 2=stopped."""
+        return self._status
+
+    @property
+    def blind_type(self) -> int | None:
+        """Blind type code reported by the gateway, if known."""
+        return self._blind_type
+
 
 class ConnectorGateway:
     """Connector Bridge (DD7002B) gateway."""
