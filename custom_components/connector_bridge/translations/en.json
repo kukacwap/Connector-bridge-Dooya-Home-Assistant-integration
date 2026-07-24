@@ -8,6 +8,14 @@
           "host": "Bridge IP address",
           "key": "API key"
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Connector Bridge",
+        "description": "Update the bridge IP address or API key. The bridge must be reachable at the new address.",
+        "data": {
+          "host": "Bridge IP address",
+          "key": "API key"
+        }
       }
     },
     "error": {
@@ -15,7 +23,8 @@
       "unknown": "Unexpected error. Check the logs."
     },
     "abort": {
-      "already_configured": "This bridge is already configured."
+      "already_configured": "This bridge is already configured.",
+      "reconfigure_successful": "The bridge configuration was updated."
     }
   }
 }

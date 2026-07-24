@@ -8,6 +8,14 @@
           "host": "Bridge IP cím",
           "key": "API kulcs"
         }
+      },
+      "reconfigure": {
+        "title": "Connector Bridge újrakonfigurálása",
+        "description": "Módosítsd a bridge IP címét vagy az API kulcsot. A bridge-nek elérhetőnek kell lennie az új címen.",
+        "data": {
+          "host": "Bridge IP cím",
+          "key": "API kulcs"
+        }
       }
     },
     "error": {
@@ -15,7 +23,8 @@
       "unknown": "Váratlan hiba. Ellenőrizd a naplót."
     },
     "abort": {
-      "already_configured": "Ez a bridge már be van állítva."
+      "already_configured": "Ez a bridge már be van állítva.",
+      "reconfigure_successful": "A bridge beállítása frissült."
     }
   }
 }

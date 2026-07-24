@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.2
+
+Add a reconfigure flow so the bridge IP or API key can be changed without
+removing and re-adding the integration.
+
+- New **Reconfigure** step (integration menu → Reconfigure) to update the
+  host/key in place, verified against the live bridge
+- Use the gateway MAC address as the entry's unique id so the integration
+  survives IP changes; existing entries migrate automatically on startup
+
 ## 1.0.1
 
 Stability fix for the gateway dropping off the network.

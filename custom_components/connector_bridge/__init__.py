@@ -34,6 +34,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not device_list:
         _LOGGER.warning("Connector Bridge at %s has no paired blinds", host)
 
+    # Older entries used the host as the unique id. Migrate them to the
+    # gateway MAC so the entry survives IP changes.
+    if gateway.mac and entry.unique_id != gateway.mac:
+        hass.config_entries.async_update_entry(entry, unique_id=gateway.mac)
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = gateway
 
     # Start multicast listener for real-time push updates
