@@ -37,6 +37,22 @@
       }
     }
   },
+  "services": {
+    "move_for_duration": {
+      "name": "Move for duration",
+      "description": "Runs a blind in one direction for a set time, then stops it. Useful for nudging motors that cannot be sent to an exact position.",
+      "fields": {
+        "direction": {
+          "name": "Direction",
+          "description": "Whether to open or close the blind."
+        },
+        "duration": {
+          "name": "Duration",
+          "description": "How long to run the motor, in seconds."
+        }
+      }
+    }
+  },
   "issues": {
     "multicast_unavailable": {
       "title": "Connector Bridge push updates unavailable",

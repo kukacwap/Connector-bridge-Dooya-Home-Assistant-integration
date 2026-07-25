@@ -37,6 +37,22 @@
       }
     }
   },
+  "services": {
+    "move_for_duration": {
+      "name": "Mozgatás megadott ideig",
+      "description": "A redőnyt a megadott irányba mozgatja a megadott ideig, majd megállítja. Hasznos olyan motoroknál, amelyek nem küldhetők pontos pozícióba.",
+      "fields": {
+        "direction": {
+          "name": "Irány",
+          "description": "Nyitás vagy zárás."
+        },
+        "duration": {
+          "name": "Időtartam",
+          "description": "Meddig járjon a motor, másodpercben."
+        }
+      }
+    }
+  },
   "issues": {
     "multicast_unavailable": {
       "title": "A Connector Bridge push frissítései nem érhetők el",

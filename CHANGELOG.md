@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.3.0
+
+Automation support.
+
+- **Movement events**: blinds now fire a `connector_bridge_blind_moved` event
+  carrying a `source` of `homeassistant` or `external`, so automations can be
+  triggered by a physical remote. Reports arriving shortly after a command we
+  sent are attributed to us; only genuine changes are announced.
+- **`connector_bridge.move_for_duration` service**: run a blind in one
+  direction for a set time, then stop. The practical way to reach a partial
+  position on motors that cannot be sent to one; the position estimate is
+  advanced accordingly.
+- **Sun-based shading blueprint** (`blueprints/automation/connector_bridge/`),
+  importable from the repository. Shades a window while the sun is on it and
+  it is warm, then restores afterwards. Handles azimuth ranges that wrap past
+  north, applies temperature hysteresis, and skips covers already near the
+  target so the bridge is not sent redundant commands.
+- Every message pushed by the gateway is now logged at debug level, which
+  makes it possible to confirm what the hardware reports for remote-initiated
+  moves.
+
 ## 1.2.0
 
 Resilience and diagnostics.

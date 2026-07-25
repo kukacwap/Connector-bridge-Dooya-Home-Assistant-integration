@@ -66,7 +66,70 @@ a DHCP address change is handled automatically. You can also change the
 address manually via **Reconfigure**. Assigning the bridge a static IP or a
 DHCP reservation is still recommended.
 
+## Automations
+
+### Sun-based shading blueprint
+
+A ready-made blueprint lives in
+[`blueprints/automation/connector_bridge/sun_shading.yaml`](blueprints/automation/connector_bridge/sun_shading.yaml).
+It shades a window while the sun is on it (optionally only when warm) and
+restores the covers afterwards.
+
+Blueprints are not distributed through HACS, so import it separately: in Home
+Assistant go to **Settings → Automations & scenes → Blueprints → Import
+blueprint** and paste the URL of that file.
+
+Set the azimuth range to the directions the window faces — ranges crossing
+north (for example 340 to 20) work correctly. Covers already near the target
+position are left alone, so the bridge isn't sent redundant commands.
+
+### Reacting to the physical remote
+
+Blinds fire a `connector_bridge_blind_moved` event whenever they report
+movement:
+
+```yaml
+trigger:
+  - platform: event
+    event_type: connector_bridge_blind_moved
+    event_data:
+      source: external
+```
+
+Event data contains `entity_id`, `mac`, `device_type`, `source`
+(`homeassistant` or `external`), `operation`, and `position`. Filtering on
+`source: external` gives you moves Home Assistant did not initiate — letting a
+wall remote act as a trigger.
+
+Whether your gateway reports remote-initiated moves depends on the hardware.
+To check, enable debug logging (below) and press a button on the remote: every
+message the gateway pushes is logged verbatim.
+
+### Nudging a blind
+
+`connector_bridge.move_for_duration` runs a blind for a set time and then stops
+it — useful for partial positions on motors that can't be commanded to one:
+
+```yaml
+action:
+  - service: connector_bridge.move_for_duration
+    target:
+      entity_id: cover.blind_1a2b
+    data:
+      direction: open
+      duration: 2
+```
+
 ## Troubleshooting
+
+Enable debug logging by adding this to `configuration.yaml` and restarting:
+
+```yaml
+logger:
+  logs:
+    custom_components.connector_bridge: debug
+```
+
 
 - **Gateway connectivity sensor** — a diagnostic entity showing whether the
   bridge is reachable, when it was last seen, and whether push updates are active.

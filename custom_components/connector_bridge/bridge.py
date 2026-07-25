@@ -20,6 +20,7 @@ from .const import (
     DEVICE_TYPE_TDBU,
     DEVICE_TYPE_WIFI_BLIND,
     DEVICE_TYPE_WIFI_CURTAIN,
+    EXTERNAL_COMMAND_GRACE,
     MIN_SEND_INTERVAL,
     MULTICAST_ADDRESS,
     OPERATION_CLOSE,
@@ -107,8 +108,12 @@ class ConnectorBlind:
         self._position: int | None = None  # 0=open, 100=closed (bridge convention)
         self._available = False
         self._callbacks: dict[str, callable] = {}
+        self._event_callbacks: dict[str, callable] = {}
         self._blind_type: int | None = None
         self._status: int | None = None
+        # When Home Assistant last commanded this blind, used to tell our own
+        # echoes apart from moves triggered elsewhere (e.g. a wall remote).
+        self._last_command: float | None = None
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -140,6 +145,24 @@ class ConnectorBlind:
             except Exception:
                 _LOGGER.exception("Callback error for blind %s", self._mac)
 
+    def _fire_event_callbacks(self, payload: dict) -> None:
+        for cb in self._event_callbacks.values():
+            try:
+                cb(payload)
+            except Exception:
+                _LOGGER.exception("Event callback error for blind %s", self._mac)
+
+    def note_command(self) -> None:
+        """Record that Home Assistant just commanded this blind."""
+        self._last_command = time.monotonic()
+
+    @property
+    def commanded_recently(self) -> bool:
+        """True if we sent a command recently enough to own the next report."""
+        if self._last_command is None:
+            return False
+        return (time.monotonic() - self._last_command) < EXTERNAL_COMMAND_GRACE
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -156,34 +179,70 @@ class ConnectorBlind:
 
     def open(self) -> None:
         """Open the blind (move to 0%)."""
+        self.note_command()
         self._parse(self._write({"operation": OPERATION_OPEN}))
         self._fire_callbacks()
 
     def close(self) -> None:
         """Close the blind (move to 100%)."""
+        self.note_command()
         self._parse(self._write({"operation": OPERATION_CLOSE}))
         self._fire_callbacks()
 
     def stop(self) -> None:
         """Stop any movement."""
+        self.note_command()
         self._parse(self._write({"operation": OPERATION_STOP}))
         self._fire_callbacks()
 
     def set_position(self, position: int) -> None:
         """Set target position (0=open, 100=closed in bridge convention)."""
+        self.note_command()
         self._parse(self._write({"targetPosition": position}))
         self._fire_callbacks()
 
     def multicast_update(self, message: dict) -> None:
         """Handle a pushed Report message from the gateway."""
+        previous_position = self._position
+        previous_status = self._status
+
         self._parse(message)
         self._fire_callbacks()
+
+        # Only announce genuine changes, so one physical travel does not
+        # produce an event per report packet.
+        if self._position == previous_position and self._status == previous_status:
+            return
+
+        source = "homeassistant" if self.commanded_recently else "external"
+        _LOGGER.debug(
+            "Blind %s moved (source=%s, operation=%s, position=%s)",
+            self._mac,
+            source,
+            self._status,
+            self._position,
+        )
+        self._fire_event_callbacks(
+            {
+                "source": source,
+                "operation": self._status,
+                "position": self._position,
+                "ha_position": self.ha_position,
+            }
+        )
 
     def register_callback(self, cb_id: str, callback: callable) -> None:
         self._callbacks[cb_id] = callback
 
     def remove_callback(self, cb_id: str) -> None:
         self._callbacks.pop(cb_id, None)
+
+    def register_event_callback(self, cb_id: str, callback: callable) -> None:
+        """Register a listener notified when this blind reports a move."""
+        self._event_callbacks[cb_id] = callback
+
+    def remove_event_callback(self, cb_id: str) -> None:
+        self._event_callbacks.pop(cb_id, None)
 
     # ------------------------------------------------------------------
     # Properties
@@ -461,7 +520,12 @@ class ConnectorGateway:
             try:
                 msg = json.loads(data)
             except Exception:
+                _LOGGER.debug("Undecodable push from %s: %r", ip, data)
                 continue
+
+            # Logged verbatim so unrecognised gateway behaviour (for example
+            # what a physical remote emits) can be inspected from the logs.
+            _LOGGER.debug("Gateway push from %s: %s", ip, msg)
 
             msgType = msg.get("msgType")
             mac = msg.get("mac")
@@ -473,6 +537,8 @@ class ConnectorGateway:
                 self._mark_seen()
             elif msgType == "GetDeviceListAck":
                 self._mark_seen()
+            elif msgType == "Report":
+                _LOGGER.debug("Report for unknown blind %s (not in device list)", mac)
 
     def start_listening(self) -> None:
         """Start the multicast listener thread."""

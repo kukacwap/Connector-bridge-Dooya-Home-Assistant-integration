@@ -64,6 +64,17 @@ def model_name(device_type: str | None) -> str:
 ISSUE_MULTICAST_UNAVAILABLE = "multicast_unavailable"
 ISSUE_IP_CHANGED = "ip_changed"
 
+# Fired when a blind reports movement, including moves Home Assistant did not
+# initiate (for example a physical remote).
+EVENT_BLIND_MOVED = "connector_bridge_blind_moved"
+
+# A gateway report arriving within this many seconds of a command we sent is
+# treated as the echo of that command rather than an external move.
+EXTERNAL_COMMAND_GRACE = 8.0
+
+# Service names
+SERVICE_MOVE_FOR_DURATION = "move_for_duration"
+
 # Seconds without any gateway contact before the connectivity sensor reports
 # the bridge as disconnected.
 GATEWAY_OFFLINE_AFTER = 300

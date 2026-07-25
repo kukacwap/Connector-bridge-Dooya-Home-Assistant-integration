@@ -1,0 +1,235 @@
+blueprint:
+  name: Connector Bridge - Sun-based shading
+  description: >
+    Shade covers while the sun is shining on a window, then restore them once
+    it moves away or things cool down.
+
+    Set the azimuth range to the compass directions the window faces (a range
+    that crosses north, such as 340 to 20, is handled correctly). The optional
+    temperature sensor stops the blinds moving on cold but sunny days.
+
+    Only covers that are not already near the target position are commanded,
+    so the bridge is not sent redundant traffic every time this runs.
+  domain: automation
+  source_url: https://github.com/kukacwap/Connector-bridge-Dooya-Home-Assistant-integration/blob/claude/home-assistant-github-setup-idmknl/blueprints/automation/connector_bridge/sun_shading.yaml
+  input:
+    covers:
+      name: Covers
+      description: The blinds shading this window.
+      selector:
+        entity:
+          multiple: true
+          filter:
+            domain: cover
+
+    azimuth_start:
+      name: Azimuth from
+      description: Start of the compass range the window faces (0 = north, 90 = east, 180 = south, 270 = west).
+      default: 90
+      selector:
+        number:
+          min: 0
+          max: 360
+          step: 1
+          unit_of_measurement: "°"
+
+    azimuth_end:
+      name: Azimuth to
+      description: End of the compass range the window faces.
+      default: 270
+      selector:
+        number:
+          min: 0
+          max: 360
+          step: 1
+          unit_of_measurement: "°"
+
+    elevation_min:
+      name: Minimum sun elevation
+      description: >
+        Only shade when the sun is at least this high. Raise it if a
+        neighbouring building shades the window in the early morning.
+      default: 10
+      selector:
+        number:
+          min: -10
+          max: 90
+          step: 1
+          unit_of_measurement: "°"
+
+    temperature_sensor:
+      name: Temperature sensor (optional)
+      description: >
+        Only shade when this sensor is above the threshold below. Leave empty
+        to shade based on the sun alone. If several are selected, the first
+        is used.
+      default: []
+      selector:
+        entity:
+          multiple: true
+          filter:
+            domain: sensor
+            device_class: temperature
+
+    temperature_threshold:
+      name: Temperature threshold
+      description: Shade once the sensor reaches this temperature.
+      default: 22
+      selector:
+        number:
+          min: -20
+          max: 50
+          step: 0.5
+          unit_of_measurement: "°"
+
+    temperature_hysteresis:
+      name: Temperature hysteresis
+      description: >
+        How far the temperature must fall back below the threshold before the
+        blinds reopen. Prevents them cycling around the threshold.
+      default: 2
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 0.5
+          unit_of_measurement: "°"
+
+    shaded_position:
+      name: Shaded position
+      description: Position to move to while shading (0 = closed, 100 = open).
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 5
+          unit_of_measurement: "%"
+
+    open_position:
+      name: Restored position
+      description: Position to return to when shading is no longer needed.
+      default: 100
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 5
+          unit_of_measurement: "%"
+
+    position_tolerance:
+      name: Position tolerance
+      description: >
+        How far a cover may be from the target before it is commanded again.
+        Keeps estimated positions from causing constant small corrections.
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 25
+          step: 1
+          unit_of_measurement: "%"
+
+mode: single
+max_exceeded: silent
+
+trigger:
+  - platform: time_pattern
+    minutes: "/5"
+  - platform: homeassistant
+    event: start
+
+variables:
+  covers: !input covers
+  azimuth_start: !input azimuth_start
+  azimuth_end: !input azimuth_end
+  elevation_min: !input elevation_min
+  temperature_sensors: !input temperature_sensor
+  temperature_threshold: !input temperature_threshold
+  temperature_hysteresis: !input temperature_hysteresis
+  shaded_position: !input shaded_position
+  open_position: !input open_position
+  position_tolerance: !input position_tolerance
+
+  azimuth: "{{ state_attr('sun.sun', 'azimuth') | float(0) }}"
+  elevation: "{{ state_attr('sun.sun', 'elevation') | float(0) }}"
+
+  # Handles ranges that wrap past north, e.g. 340 -> 20.
+  sun_on_window: >
+    {% set s = azimuth_start | float(0) %}
+    {% set e = azimuth_end | float(0) %}
+    {% if s <= e %}
+      {{ s <= azimuth <= e }}
+    {% else %}
+      {{ azimuth >= s or azimuth <= e }}
+    {% endif %}
+
+  sun_high_enough: "{{ elevation >= (elevation_min | float(0)) }}"
+
+  temp_sensor: "{{ (temperature_sensors | first) if (temperature_sensors | count) > 0 else '' }}"
+
+  warm_enough: >
+    {% if not temp_sensor %}
+      true
+    {% else %}
+      {{ (states(temp_sensor) | float(-999)) >= (temperature_threshold | float(0)) }}
+    {% endif %}
+
+  cooled_down: >
+    {% if not temp_sensor %}
+      false
+    {% else %}
+      {{ (states(temp_sensor) | float(999))
+         <= ((temperature_threshold | float(0)) - (temperature_hysteresis | float(0))) }}
+    {% endif %}
+
+  should_shade: "{{ sun_on_window and sun_high_enough and warm_enough }}"
+  should_restore: "{{ (not sun_on_window) or (not sun_high_enough) or cooled_down }}"
+
+  need_shading: >
+    {% set ns = namespace(items=[]) %}
+    {% for c in covers %}
+      {% set p = state_attr(c, 'current_position') %}
+      {% if p is none or ((p | float(0)) - (shaded_position | float(0))) | abs > (position_tolerance | float(0)) %}
+        {% set ns.items = ns.items + [c] %}
+      {% endif %}
+    {% endfor %}
+    {{ ns.items }}
+
+  need_restoring: >
+    {% set ns = namespace(items=[]) %}
+    {% for c in covers %}
+      {% set p = state_attr(c, 'current_position') %}
+      {% if p is none or ((p | float(0)) - (open_position | float(0))) | abs > (position_tolerance | float(0)) %}
+        {% set ns.items = ns.items + [c] %}
+      {% endif %}
+    {% endfor %}
+    {{ ns.items }}
+
+action:
+  - choose:
+      - alias: Sun is on the window - shade it
+        conditions:
+          - condition: template
+            value_template: "{{ should_shade }}"
+          - condition: template
+            value_template: "{{ need_shading | count > 0 }}"
+        sequence:
+          - service: cover.set_cover_position
+            target:
+              entity_id: "{{ need_shading }}"
+            data:
+              position: !input shaded_position
+
+      - alias: Shading no longer needed - restore
+        conditions:
+          - condition: template
+            value_template: "{{ should_restore }}"
+          - condition: template
+            value_template: "{{ need_restoring | count > 0 }}"
+        sequence:
+          - service: cover.set_cover_position
+            target:
+              entity_id: "{{ need_restoring }}"
+            data:
+              position: !input open_position

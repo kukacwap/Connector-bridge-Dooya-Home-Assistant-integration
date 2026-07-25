@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 
+import voluptuous as vol
+
 from homeassistant.components.cover import (
     ATTR_CURRENT_POSITION,
     ATTR_POSITION,
@@ -14,6 +16,7 @@ from homeassistant.components.cover import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_platform
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
@@ -27,7 +30,9 @@ from .const import (
     DEVICE_TYPE_SUNBLIND,
     DEVICE_TYPE_WIFI_CURTAIN,
     DOMAIN,
+    EVENT_BLIND_MOVED,
     OPT_TRAVEL_TIMES,
+    SERVICE_MOVE_FOR_DURATION,
     model_name,
 )
 from .travelcalculator import TravelCalculator
@@ -90,6 +95,18 @@ async def async_setup_entry(
     ]
     async_add_entities(entities, update_before_add=True)
 
+    platform = entity_platform.async_get_current_platform()
+    platform.async_register_entity_service(
+        SERVICE_MOVE_FOR_DURATION,
+        {
+            vol.Required("direction"): vol.In(["open", "close"]),
+            vol.Required("duration"): vol.All(
+                vol.Coerce(float), vol.Range(min=0.1, max=300)
+            ),
+        },
+        "async_move_for_duration",
+    )
+
 
 class ConnectorBridgeCover(CoverEntity, RestoreEntity):
     """Motorized blind via Connector Bridge.
@@ -147,6 +164,7 @@ class ConnectorBridgeCover(CoverEntity, RestoreEntity):
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
         self._blind.register_callback(self.entity_id, self._on_push_update)
+        self._blind.register_event_callback(self.entity_id, self._on_blind_event)
 
         # Restore the last assumed position across restarts.
         last_state = await self.async_get_last_state()
@@ -162,6 +180,28 @@ class ConnectorBridgeCover(CoverEntity, RestoreEntity):
         self._stop_travel_updates()
         self._cancel_pending_stop()
         self._blind.remove_callback(self.entity_id)
+        self._blind.remove_event_callback(self.entity_id)
+
+    def _on_blind_event(self, payload: dict) -> None:
+        """Called from the gateway's listener thread when the blind moves."""
+        self.hass.loop.call_soon_threadsafe(self._fire_moved_event, payload)
+
+    @callback
+    def _fire_moved_event(self, payload: dict) -> None:
+        """Fire a bus event so automations can react to any movement.
+
+        ``source`` is ``external`` for moves Home Assistant did not command,
+        which is how a physical remote can be used as a trigger.
+        """
+        self.hass.bus.async_fire(
+            EVENT_BLIND_MOVED,
+            {
+                "entity_id": self.entity_id,
+                "mac": self._blind.mac,
+                "device_type": self._blind.device_type,
+                **payload,
+            },
+        )
 
     def _on_push_update(self) -> None:
         """Called from the gateway's listener/executor thread.
@@ -348,6 +388,33 @@ class ConnectorBridgeCover(CoverEntity, RestoreEntity):
 
         self._unsub_stop = async_call_later(
             self.hass, travel_seconds, self._async_stop_at_target
+        )
+
+    async def async_move_for_duration(self, direction: str, duration: float) -> None:
+        """Run the motor for a fixed time, then stop.
+
+        The practical way to reach a partial position on motors that cannot
+        be commanded to one. The position estimate is advanced by however
+        far the blind travelled in that time.
+        """
+        self._cancel_pending_stop()
+
+        travelled = duration / self._travel_time * 100.0
+        current = self._travel.current_position()
+        target = current + travelled if direction == "open" else current - travelled
+        target = max(0.0, min(100.0, target))
+
+        self._travel.start_travel(target)
+        self._start_travel_updates()
+        self.async_write_ha_state()
+
+        if direction == "open":
+            await self.hass.async_add_executor_job(self._blind.open)
+        else:
+            await self.hass.async_add_executor_job(self._blind.close)
+
+        self._unsub_stop = async_call_later(
+            self.hass, duration, self._async_stop_at_target
         )
 
     async def _async_stop_at_target(self, _now) -> None:
