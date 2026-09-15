@@ -155,3 +155,35 @@ def test_brand_icons_are_square():
     for icon in BRAND.glob("icon*.png"):
         width, height = _png_size(icon)
         assert width == height, f"{icon.name} is {width}x{height}"
+
+
+# ----------------------------------------------------------------------
+# Blueprints
+# ----------------------------------------------------------------------
+
+BLUEPRINTS = Path(__file__).parent.parent / "blueprints"
+DEFAULT_BRANCH = "main"
+
+
+class _BlueprintLoader(yaml.SafeLoader):
+    """SafeLoader that tolerates Home Assistant's !input tag."""
+
+
+_BlueprintLoader.add_constructor(
+    "!input", lambda loader, node: loader.construct_scalar(node)
+)
+
+
+@pytest.mark.parametrize(
+    "path", sorted(BLUEPRINTS.rglob("*.yaml")), ids=lambda p: p.stem
+)
+def test_blueprint_source_url_points_at_itself(path: Path):
+    """A stale source_url breaks import and re-import of the blueprint.
+
+    It has to name the default branch and the blueprint's own path, so
+    renaming either one fails here rather than for whoever imports it.
+    """
+    blueprint = yaml.load(path.read_text(), Loader=_BlueprintLoader)
+    source_url = blueprint["blueprint"]["source_url"]
+    relative = path.relative_to(BLUEPRINTS.parent).as_posix()
+    assert source_url.endswith(f"/blob/{DEFAULT_BRANCH}/{relative}"), source_url

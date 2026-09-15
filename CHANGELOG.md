@@ -10,6 +10,10 @@ Test suite and the bugs it found.
   release from this file, after checking the tag against `manifest.json`.
   HACS offers releases, not branch commits, so a merge alone never reached
   anyone as an update.
+- **Fixed: the sun shading blueprint pointed at a branch that no longer
+  exists.** Its `source_url` named the old default branch, so importing and
+  re-importing it relied on a GitHub redirect. It now names `main`, and a
+  test ties the URL to the blueprint's own path.
 
 - **Unit tests** (`tests/`, 169 of them) covering the UDP protocol layer, the
   position estimator, both flows, both platforms and diagnostics, run on every
