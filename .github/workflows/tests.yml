@@ -15,6 +15,9 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
+          # The dependency file is not one of the names pip caching looks for
+          # by default, and setup-python fails the job if it finds none.
+          cache-dependency-path: requirements_test.txt
 
       - name: Install dependencies
         run: |

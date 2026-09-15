@@ -11,7 +11,7 @@ blueprint:
     Only covers that are not already near the target position are commanded,
     so the bridge is not sent redundant traffic every time this runs.
   domain: automation
-  source_url: https://github.com/kukacwap/Connector-bridge-Dooya-Home-Assistant-integration/blob/claude/home-assistant-github-setup-idmknl/blueprints/automation/connector_bridge/sun_shading.yaml
+  source_url: https://github.com/kukacwap/Connector-bridge-Dooya-Home-Assistant-integration/blob/main/blueprints/automation/connector_bridge/sun_shading.yaml
   input:
     covers:
       name: Covers

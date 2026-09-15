@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.3.2
+
+Packaging, so releases reach Home Assistant on their own.
+
+- **Brand icon** (`custom_components/connector_bridge/brand/`), so HACS stops
+  reporting the repository as having no brand assets.
+- **Release workflow**: pushing a `V*` tag now publishes the matching GitHub
+  release from this file, after checking the tag against `manifest.json`.
+  HACS offers releases, not branch commits, so a merge alone never reached
+  anyone as an update.
+- **Fixed: the sun shading blueprint pointed at a branch that no longer
+  exists.** Its `source_url` named the old default branch, so importing and
+  re-importing it relied on a GitHub redirect. It now names `main`, and a
+  test ties the URL to the blueprint's own path.
+- **Fixed CI**: the Tests workflow asked `setup-python` to cache pip, which
+  looks only for `requirements.txt` or `pyproject.toml` and fails the job when
+  it finds neither, so the tests never ran.
+
 ## 1.3.1
 
 Test suite and the bugs it found.
