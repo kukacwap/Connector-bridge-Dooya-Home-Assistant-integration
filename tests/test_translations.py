@@ -124,3 +124,34 @@ def test_manifest_is_consistent():
     assert manifest["config_flow"] is True
     assert manifest["requirements"] == ["pycryptodomex==3.21.0"]
     assert COMPONENT.name == manifest["domain"]
+
+
+# ----------------------------------------------------------------------
+# Brand assets
+# ----------------------------------------------------------------------
+
+BRAND = COMPONENT / "brand"
+
+
+def _png_size(path: Path) -> tuple[int, int]:
+    """Read a PNG's dimensions from its IHDR, without pulling in Pillow."""
+    raw = path.read_bytes()
+    assert raw[:8] == b"\x89PNG\r\n\x1a\n", f"{path.name} is not a PNG"
+    assert raw[12:16] == b"IHDR", f"{path.name} has no IHDR chunk"
+    width = int.from_bytes(raw[16:20], "big")
+    height = int.from_bytes(raw[20:24], "big")
+    return width, height
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"), [("icon.png", (256, 256)), ("icon@2x.png", (512, 512))]
+)
+def test_brand_icon_dimensions(name: str, expected: tuple[int, int]):
+    """HACS and the Home Assistant brands repository both require exact sizes."""
+    assert _png_size(BRAND / name) == expected
+
+
+def test_brand_icons_are_square():
+    for icon in BRAND.glob("icon*.png"):
+        width, height = _png_size(icon)
+        assert width == height, f"{icon.name} is {width}x{height}"

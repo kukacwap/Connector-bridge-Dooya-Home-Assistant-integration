@@ -4,6 +4,13 @@
 
 Test suite and the bugs it found.
 
+- **Brand icon** (`custom_components/connector_bridge/brand/`), so HACS stops
+  reporting the repository as having no brand assets.
+- **Release workflow**: pushing a `V*` tag now publishes the matching GitHub
+  release from this file, after checking the tag against `manifest.json`.
+  HACS offers releases, not branch commits, so a merge alone never reached
+  anyone as an update.
+
 - **Unit tests** (`tests/`, 169 of them) covering the UDP protocol layer, the
   position estimator, both flows, both platforms and diagnostics, run on every
   push by a new `Tests` workflow. Each fix below has a test that fails without it.
