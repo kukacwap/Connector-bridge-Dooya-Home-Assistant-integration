@@ -45,7 +45,7 @@ SUPPORTED_BLIND_TYPES = [
 
 def _timestamp() -> str:
     """Return current UTC time formatted as HA msgID."""
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.UTC)
     return now.strftime("%Y%m%d%H%M%S%f")[:-3]
 
 
@@ -400,13 +400,22 @@ class ConnectorGateway:
 
                     while True:
                         data, _ = s.recvfrom(SOCKET_BUFSIZE)
-                        responses.append(json.loads(data))
+                        try:
+                            responses.append(json.loads(data))
+                        except ValueError:
+                            # Any host on the LAN can reach this socket, and
+                            # the gateway itself occasionally truncates a
+                            # packet. Skip what we cannot parse rather than
+                            # failing the command.
+                            _LOGGER.debug("Ignoring undecodable packet: %r", data[:64])
                         if len(data) < int(0.9 * 1024):
                             break
                         s.settimeout(0.2)
 
-                    self._mark_seen()
-                    return responses
+                    if responses:
+                        self._mark_seen()
+                        return responses
+                    attempt += 1
                 except socket.timeout:
                     if responses:
                         self._mark_seen()
@@ -414,6 +423,17 @@ class ConnectorGateway:
                     attempt += 1
                     _LOGGER.debug(
                         "Timeout attempt %d sending %s", attempt, message.get("msgType")
+                    )
+                except OSError as err:
+                    # No route to the bridge, for example after it moved to
+                    # another subnet. Treated like silence so the caller can
+                    # go looking for its new address.
+                    attempt += 1
+                    _LOGGER.debug(
+                        "Network error attempt %d sending %s: %s",
+                        attempt,
+                        message.get("msgType"),
+                        err,
                     )
                 finally:
                     s.close()
@@ -505,7 +525,9 @@ class ConnectorGateway:
         """Background thread that receives multicast pushes from the bridge."""
         while self._listening:
             if self._mcast_socket is None:
-                continue
+                # Nothing will hand this thread a socket after the fact, so
+                # exit rather than spinning on a condition that cannot change.
+                break
             try:
                 data, (ip, _) = self._mcast_socket.recvfrom(SOCKET_BUFSIZE)
             except socket.timeout:

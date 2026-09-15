@@ -3,64 +3,65 @@
     "flow_title": "{name}",
     "step": {
       "user": {
-        "title": "Connector Bridge beállítása",
-        "description": "Az API kulcsot a Connector+ appban találod: **Beállítások → Névjegy → koppints 5-ször bárhova**.",
+        "title": "Set up Connector Bridge",
+        "description": "Find your API key in the Connector+ app: **Settings → About → tap 5 times anywhere**.",
         "data": {
-          "host": "Bridge IP cím",
-          "key": "API kulcs"
+          "host": "Bridge IP address",
+          "key": "API key"
         }
       },
       "reconfigure": {
-        "title": "Connector Bridge újrakonfigurálása",
-        "description": "Módosítsd a bridge IP címét vagy az API kulcsot. A bridge-nek elérhetőnek kell lennie az új címen.",
+        "title": "Reconfigure Connector Bridge",
+        "description": "Update the bridge IP address or API key. The bridge must be reachable at the new address.",
         "data": {
-          "host": "Bridge IP cím",
-          "key": "API kulcs"
+          "host": "Bridge IP address",
+          "key": "API key"
         }
       }
     },
     "error": {
-      "cannot_connect": "Nem sikerült csatlakozni a bridge-hez. Ellenőrizd az IP-t és a kulcsot.",
-      "unknown": "Váratlan hiba. Ellenőrizd a naplót."
+      "cannot_connect": "Could not connect to the bridge. Check the IP address and key.",
+      "invalid_key": "Invalid API key. The key shown in the Connector+ app is exactly 16 characters long.",
+      "unknown": "Unexpected error. Check the logs."
     },
     "abort": {
-      "already_configured": "Ez a bridge már be van állítva.",
-      "not_connector_bridge": "Ez az eszköz nem Connector bridge.",
-      "reconfigure_successful": "A bridge beállítása frissült."
+      "already_configured": "This bridge is already configured.",
+      "not_connector_bridge": "This device is not a Connector bridge.",
+      "reconfigure_successful": "The bridge configuration was updated."
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Redőny menetidők",
-        "description": "Teljes fel-/lehúzási idő másodpercben minden redőnyhöz (MAC cím szerint). A pozíciót jelenteni nem tudó motoroknál ez alapján becsüljük a pozíciót, hogy a HomeKitben helyesen jelenjen meg az állapot."
+        "title": "Blind travel times",
+        "description": "Full open/close travel time in seconds for each blind (by MAC address). Used to estimate position for motors that don't report one, so the state shows correctly in HomeKit."
       }
     }
   },
   "services": {
     "move_for_duration": {
-      "name": "Mozgatás megadott ideig",
-      "description": "A redőnyt a megadott irányba mozgatja a megadott ideig, majd megállítja. Hasznos olyan motoroknál, amelyek nem küldhetők pontos pozícióba.",
+      "name": "Move for duration",
+      "description": "Runs a blind in one direction for a set time, then stops it. Useful for nudging motors that cannot be sent to an exact position.",
       "fields": {
         "direction": {
-          "name": "Irány",
-          "description": "Nyitás vagy zárás."
+          "name": "Direction",
+          "description": "Whether to open or close the blind."
         },
         "duration": {
-          "name": "Időtartam",
-          "description": "Meddig járjon a motor, másodpercben."
+          "name": "Duration",
+          "description": "How long to run the motor, in seconds."
         }
       }
     }
   },
   "issues": {
     "multicast_unavailable": {
-      "title": "A Connector Bridge push frissítései nem érhetők el",
-      "description": "A Home Assistant nem tudta megnyitni a valós idejű frissítésekhez használt multicast socketet, ezért lekérdezéses módra váltott. A redőnyök állapota lassabban frissül, és a fizikai távirányítóval végzett változtatásokat előfordulhat, hogy nem érzékeli.\n\nEz általában azt jelenti, hogy a multicast forgalom blokkolva van a Home Assistant és a bridge között — gyakori, ha a Home Assistant Dockerben, bridge hálózati módban fut, vagy ha a bridge másik VLAN-on vagy alhálózaton van. A host hálózati mód használata, vagy azonos alhálózatra helyezés általában megoldja."
+      "title": "Connector Bridge push updates unavailable",
+      "description": "Home Assistant could not open the multicast socket used for real-time updates from the bridge, so it has fallen back to polling. Blind states will update more slowly and changes made with a physical remote may not be detected.\n\nThis usually means multicast traffic is blocked between Home Assistant and the bridge — common when Home Assistant runs in Docker with bridge networking, or when the bridge is on a different VLAN or subnet. Using host networking, or placing both on the same subnet, normally resolves it."
     },
     "ip_changed": {
-      "title": "A Connector Bridge IP címe megváltozott",
-      "description": "A bridge nem volt elérhető a korábbi címén, és a(z) {ip} címen található meg újra. A Home Assistant automatikusan frissítette a beállítást, így most nincs teendő.\n\nHogy ez ne forduljon elő újra, adj a bridge-nek statikus IP címet vagy DHCP foglalást a routeren."
+      "title": "Connector Bridge IP address changed",
+      "description": "The bridge was not reachable at its previous address and was found again at {ip}. Home Assistant has updated the configuration automatically, so no action is required right now.\n\nTo stop this happening again, give the bridge a static IP address or a DHCP reservation in your router."
     }
   }
 }

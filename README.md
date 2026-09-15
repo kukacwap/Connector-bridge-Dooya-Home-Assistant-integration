@@ -144,6 +144,19 @@ logger:
 
 - `pycryptodomex` (installed automatically as a dependency)
 
+## Development
+
+Run the test suite against a pinned Home Assistant core:
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements_test.txt
+pytest tests
+```
+
+`pytest tests --cov=custom_components.connector_bridge --cov-report=term-missing`
+adds a coverage report. The suite runs on every push via the `Tests` workflow.
+
 ## Disclaimer
 
 This is a community integration and is not affiliated with or endorsed by Dooya or Motionblinds. Use at your own risk.

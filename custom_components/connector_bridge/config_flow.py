@@ -30,6 +30,10 @@ _LOGGER = logging.getLogger(__name__)
 
 DISCOVERY_TIMEOUT = 5.0
 
+# The Connector+ app hands out a 16 character API key; it is used directly as
+# an AES-128 key, so any other length can only fail.
+KEY_LENGTH = 16
+
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_HOST): str,
@@ -47,6 +51,11 @@ async def _test_connection(
     success, and ``mac`` is the gateway's MAC address (used as the stable
     unique id, since the IP can change).
     """
+    if len(key) != KEY_LENGTH:
+        # Caught up front so a mistyped key reports itself instead of
+        # surfacing as an unexplained AES error once the bridge answers.
+        return "invalid_key", None
+
     def _connect():
         gw = ConnectorGateway(ip=host, key=key, timeout=DEFAULT_TIMEOUT)
         gw.get_device_list()
@@ -59,6 +68,8 @@ async def _test_connection(
         return None, mac
     except TimeoutError:
         return "cannot_connect", None
+    except ValueError:
+        return "invalid_key", None
     except Exception as err:
         _LOGGER.error("Unexpected error connecting to bridge: %s", err)
         return "unknown", None
@@ -193,7 +204,13 @@ class ConnectorBridgeOptionsFlow(config_entries.OptionsFlow):
     async def async_step_init(self, user_input=None) -> FlowResult:
         """Configure the travel time (seconds) for each blind."""
         if user_input is not None:
-            travel_times = {mac: float(value) for mac, value in user_input.items()}
+            # Merge rather than replace: a blind the gateway did not list this
+            # time (asleep, out of range) is not on the form, and its
+            # configured travel time must survive.
+            travel_times = {
+                **self.config_entry.options.get(OPT_TRAVEL_TIMES, {}),
+                **{mac: float(value) for mac, value in user_input.items()},
+            }
             return self.async_create_entry(
                 title="", data={OPT_TRAVEL_TIMES: travel_times}
             )
