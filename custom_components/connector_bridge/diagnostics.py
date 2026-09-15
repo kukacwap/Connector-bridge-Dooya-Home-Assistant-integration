@@ -17,6 +17,19 @@ from .const import CONF_KEY, DOMAIN, OPT_TRAVEL_TIMES, model_name
 TO_REDACT = {CONF_KEY, "host", "mac", "ip_address"}
 
 
+def _redact_options(options: dict[str, Any]) -> dict[str, Any]:
+    """Strip hardware addresses out of the stored options.
+
+    The travel time map is keyed by blind MAC. The values themselves are
+    reported per blind below, keyed by index, so only the count is kept here.
+    """
+    redacted = dict(options)
+    travel_times = redacted.pop(OPT_TRAVEL_TIMES, None)
+    if travel_times is not None:
+        redacted["travel_times_configured"] = len(travel_times)
+    return redacted
+
+
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, Any]:
@@ -26,7 +39,7 @@ async def async_get_config_entry_diagnostics(
     data: dict[str, Any] = {
         "entry": {
             "data": async_redact_data(dict(entry.data), TO_REDACT),
-            "options": dict(entry.options),
+            "options": _redact_options(dict(entry.options)),
             "version": entry.version,
         }
     }

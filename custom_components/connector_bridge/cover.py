@@ -131,13 +131,17 @@ class ConnectorBridgeCover(CoverEntity, RestoreEntity):
         self._gateway = gateway
         self._blind = blind
         self._entry = entry
-        self._travel_time = travel_time
-        self._travel = TravelCalculator(travel_time)
+        # Clamped to match TravelCalculator, and so a stored travel time of
+        # zero cannot divide by zero when converting a distance to seconds.
+        self._travel_time = max(float(travel_time), 0.1)
+        self._travel = TravelCalculator(self._travel_time)
         self._unsub_travel = None
         self._unsub_stop = None
 
         self._attr_unique_id = f"{DOMAIN}_{blind.mac}"
-        self._attr_name = f"Blind {blind.mac[-4:]}"
+        # The cover is the primary entity of its device, so it inherits the
+        # device name rather than repeating it (has_entity_name convention).
+        self._attr_name = None
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, blind.mac)},
             name=f"Blind {blind.mac[-4:]}",

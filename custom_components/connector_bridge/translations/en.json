@@ -21,6 +21,7 @@
     },
     "error": {
       "cannot_connect": "Could not connect to the bridge. Check the IP address and key.",
+      "invalid_key": "Invalid API key. The key shown in the Connector+ app is exactly 16 characters long.",
       "unknown": "Unexpected error. Check the logs."
     },
     "abort": {

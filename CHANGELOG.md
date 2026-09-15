@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.3.1
+
+Test suite and the bugs it found.
+
+- **Unit tests** (`tests/`, 169 of them) covering the UDP protocol layer, the
+  position estimator, both flows, both platforms and diagnostics, run on every
+  push by a new `Tests` workflow. Each fix below has a test that fails without it.
+- **Fixed: a malformed UDP packet aborted the command that received it.**
+  Anything on the LAN can reach the gateway socket, and the bridge itself
+  occasionally truncates a reply; the resulting `JSONDecodeError` escaped as
+  a service-call failure. Unparseable packets are now skipped.
+- **Fixed: a network error bypassed IP recovery.** A bridge moved to another
+  subnet answers with `OSError` rather than silence, which skipped the
+  rediscovery path and left the connectivity sensor reporting a bridge that
+  was gone. Unreachable is now treated like silent: retried, then surfaced
+  as a timeout so the bridge is looked for by MAC.
+- **Fixed: blinds were named twice** ("Blind 0001 Blind 0001"). The cover is
+  its device's primary entity and now takes the device name. Existing entity
+  ids are unaffected; only the displayed name changes.
+- **Fixed: diagnostics leaked every blind's MAC address** through the stored
+  travel time map, which is keyed by MAC — despite the rest of the report
+  deliberately using indexes to avoid exactly that. Only the number of
+  configured travel times is reported now; the values remain per blind.
+- **Fixed: a wrong API key reported "Unexpected error. Check the logs."**
+  The key is used directly as an AES-128 key, so a length other than 16
+  characters failed deep inside the crypto layer. Length is now checked up
+  front and reported as an invalid key.
+- **Fixed: the options screen discarded travel times** for blinds the gateway
+  did not list at that moment. Saved values are now merged, not replaced.
+- **Fixed: the Hungarian translation never reached anyone.** `strings.json`
+  held the Hungarian text, which Home Assistant reads as the English source,
+  and there was no `translations/hu.json`. The Hungarian strings now ship
+  where they are loaded from, and `strings.json` is English again.
+- **Fixed: `datetime.utcnow()`**, deprecated and scheduled for removal, used
+  to build every message id.
+- Hardened a stored travel time of zero (division by zero when converting a
+  distance to seconds) and a multicast listener that could spin on a CPU
+  core if it ever lost its socket.
+
 ## 1.3.0
 
 Automation support.
