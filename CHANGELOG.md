@@ -1,8 +1,8 @@
 # Changelog
 
-## 1.3.1
+## 1.3.2
 
-Test suite and the bugs it found.
+Packaging, so releases reach Home Assistant on their own.
 
 - **Brand icon** (`custom_components/connector_bridge/brand/`), so HACS stops
   reporting the repository as having no brand assets.
@@ -14,6 +14,13 @@ Test suite and the bugs it found.
   exists.** Its `source_url` named the old default branch, so importing and
   re-importing it relied on a GitHub redirect. It now names `main`, and a
   test ties the URL to the blueprint's own path.
+- **Fixed CI**: the Tests workflow asked `setup-python` to cache pip, which
+  looks only for `requirements.txt` or `pyproject.toml` and fails the job when
+  it finds neither, so the tests never ran.
+
+## 1.3.1
+
+Test suite and the bugs it found.
 
 - **Unit tests** (`tests/`, 169 of them) covering the UDP protocol layer, the
   position estimator, both flows, both platforms and diagnostics, run on every

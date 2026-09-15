@@ -126,6 +126,24 @@ def test_manifest_is_consistent():
     assert COMPONENT.name == manifest["domain"]
 
 
+def test_changelog_documents_the_current_version():
+    """The release workflow builds its notes from this section, and refuses
+    to publish a tag the manifest does not agree with. A version with no
+    section would fail at tag time, once the tag is already pushed."""
+    version = _load(COMPONENT / "manifest.json")["version"]
+    changelog = (COMPONENT.parent.parent / "CHANGELOG.md").read_text().splitlines()
+    assert f"## {version}" in changelog, f"CHANGELOG.md has no '## {version}'"
+
+
+def test_changelog_newest_section_is_the_manifest_version():
+    """Entries for unreleased work must not be filed under a shipped version,
+    or its release notes describe things that release does not contain."""
+    version = _load(COMPONENT / "manifest.json")["version"]
+    changelog = (COMPONENT.parent.parent / "CHANGELOG.md").read_text().splitlines()
+    first = next(line for line in changelog if line.startswith("## "))
+    assert first == f"## {version}", f"{first!r} is newer than manifest {version}"
+
+
 # ----------------------------------------------------------------------
 # Brand assets
 # ----------------------------------------------------------------------
