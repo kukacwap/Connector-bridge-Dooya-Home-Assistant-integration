@@ -151,10 +151,23 @@ def test_send_closes_socket_on_every_attempt(monkeypatch):
     assert fake.closed == 3
 
 
-def test_send_survives_undecodable_packet(monkeypatch):
-    """A malformed packet must not escape as a JSON error to the caller."""
-    gw, _ = _gateway([[b"{not json"], [{"msgType": "Ack"}]], monkeypatch)
+def test_send_keeps_listening_after_an_undecodable_packet(monkeypatch):
+    """Noise must not end the wait for a reply that is still on its way.
+
+    Giving up and retrying sends the next attempt from a new socket, while
+    the gateway answers the one that was just closed — so the command fails
+    even though the bridge replied.
+    """
+    gw, fake = _gateway([[b"{not json", {"msgType": "Ack"}]], monkeypatch)
     assert gw._send({"msgType": "Ping"}) == [{"msgType": "Ack"}]
+    assert len(fake.sent) == 1, "retried instead of waiting on the same socket"
+
+
+def test_send_gives_up_when_nothing_decodable_ever_arrives(monkeypatch):
+    gw, fake = _gateway([[b"{not json"], [b"{not json"], [b"{not json"]], monkeypatch)
+    with pytest.raises(TimeoutError):
+        gw._send({"msgType": "Ping"})
+    assert len(fake.sent) == 3
 
 
 def test_send_raises_timeout_not_oserror_on_network_failure(monkeypatch):

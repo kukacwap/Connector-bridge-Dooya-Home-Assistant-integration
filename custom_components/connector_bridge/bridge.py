@@ -45,7 +45,7 @@ SUPPORTED_BLIND_TYPES = [
 
 def _timestamp() -> str:
     """Return current UTC time formatted as HA msgID."""
-    now = datetime.datetime.now(datetime.UTC)
+    now = datetime.datetime.now(datetime.timezone.utc)
     return now.strftime("%Y%m%d%H%M%S%f")[:-3]
 
 
@@ -401,13 +401,16 @@ class ConnectorGateway:
                     while True:
                         data, _ = s.recvfrom(SOCKET_BUFSIZE)
                         try:
-                            responses.append(json.loads(data))
+                            parsed = json.loads(data)
                         except ValueError:
                             # Any host on the LAN can reach this socket, and
                             # the gateway itself occasionally truncates a
-                            # packet. Skip what we cannot parse rather than
-                            # failing the command.
+                            # packet. Keep waiting on the same socket: the
+                            # reply we asked for may still be on its way, and
+                            # retrying would send it to a socket we closed.
                             _LOGGER.debug("Ignoring undecodable packet: %r", data[:64])
+                            continue
+                        responses.append(parsed)
                         if len(data) < int(0.9 * 1024):
                             break
                         s.settimeout(0.2)
