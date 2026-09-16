@@ -14,9 +14,18 @@ Packaging, so releases reach Home Assistant on their own.
   exists.** Its `source_url` named the old default branch, so importing and
   re-importing it relied on a GitHub redirect. It now names `main`, and a
   test ties the URL to the blueprint's own path.
+- **Fixed a regression from 1.3.1: an unreadable UDP packet could make a
+  blind unavailable.** Skipping the packet still ended the wait for a reply,
+  because the "was this the last packet" size check ran on the skipped packet
+  too. The command then retried from a new socket while the gateway answered
+  the one just closed — three times, then a timeout, which marked the bridge
+  unavailable and sent the integration looking for a new IP address. The
+  socket is now kept open until the reply arrives or the timeout expires.
 - **Fixed CI**: the Tests workflow asked `setup-python` to cache pip, which
   looks only for `requirements.txt` or `pyproject.toml` and fails the job when
   it finds neither, so the tests never ran.
+- `datetime.UTC` needs Python 3.11; the equivalent `datetime.timezone.utc`
+  works on every version Home Assistant has shipped.
 
 ## 1.3.1
 
