@@ -63,6 +63,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if entry.unique_id != formatted_mac:
             hass.config_entries.async_update_entry(entry, unique_id=formatted_mac)
 
+    _async_sync_title(hass, entry)
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = gateway
 
     _async_register_gateway_device(hass, entry, gateway)
@@ -119,6 +121,19 @@ async def _async_recover_ip(
         return ip
 
     return None
+
+
+@callback
+def _async_sync_title(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Keep the generated entry title naming the bridge's current address.
+
+    A DHCP discovery updates the stored host but not the title, which then
+    keeps showing an address the bridge no longer has. Titles the user chose
+    themselves are left alone.
+    """
+    title = f"Connector Bridge ({entry.data[CONF_HOST]})"
+    if entry.title != title and entry.title.startswith("Connector Bridge ("):
+        hass.config_entries.async_update_entry(entry, title=title)
 
 
 @callback

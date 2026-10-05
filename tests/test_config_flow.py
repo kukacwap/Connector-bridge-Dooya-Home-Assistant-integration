@@ -39,7 +39,20 @@ def _patch_connect(mac=GATEWAY_MAC, error=None):
     return patch("custom_components.connector_bridge.config_flow.ConnectorGateway", _Gateway)
 
 
-async def test_user_flow_success(hass):
+@pytest.fixture
+def mock_setup_entry():
+    """Stop a created entry from being set up against a real bridge.
+
+    Home Assistant sets an entry up as soon as a flow creates it, which here
+    would open a real socket to the address under test.
+    """
+    with patch(
+        "custom_components.connector_bridge.async_setup_entry", return_value=True
+    ) as mock:
+        yield mock
+
+
+async def test_user_flow_success(hass, mock_setup_entry):
     with patch(
         "custom_components.connector_bridge.config_flow.discover_gateways",
         return_value={GATEWAY_MAC: HOST},
@@ -59,7 +72,7 @@ async def test_user_flow_success(hass):
     assert result["result"].unique_id == FORMATTED_MAC
 
 
-async def test_user_flow_strips_whitespace(hass):
+async def test_user_flow_strips_whitespace(hass, mock_setup_entry):
     with patch(
         "custom_components.connector_bridge.config_flow.discover_gateways",
         return_value={},
@@ -185,7 +198,7 @@ async def test_dhcp_rejects_non_connector_device(hass):
     assert result["reason"] == "not_connector_bridge"
 
 
-async def test_dhcp_offers_the_discovered_host(hass):
+async def test_dhcp_offers_the_discovered_host(hass, mock_setup_entry):
     with patch(
         "custom_components.connector_bridge.config_flow.discover_gateways",
         return_value={GATEWAY_MAC: HOST},

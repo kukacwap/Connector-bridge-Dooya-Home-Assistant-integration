@@ -38,7 +38,9 @@ async def test_setup_and_unload(hass, setup_integration, fake_gateway):
 
 async def test_gateway_device_registered(hass, setup_integration):
     device_registry = dr.async_get(hass)
-    device = device_registry.async_get_device(identifiers={(DOMAIN, GATEWAY_MAC)})
+    device = device_registry.async_get_device_by_identifier(
+        (DOMAIN, GATEWAY_MAC), setup_integration.entry_id
+    )
     assert device is not None
     assert device.manufacturer == "Dooya"
     assert device.model == "Connector Bridge (DD7002B)"
@@ -290,7 +292,49 @@ async def test_setup_without_a_gateway_mac(hass, mock_config_entry):
         assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
         await hass.async_block_till_done()
 
-    assert dr.async_get(hass).async_get_device(identifiers={(DOMAIN, GATEWAY_MAC)}) is None
+    device_registry = dr.async_get(hass)
+    assert (
+        device_registry.async_get_device_by_identifier(
+            (DOMAIN, GATEWAY_MAC), mock_config_entry.entry_id
+        )
+        is None
+    )
+
+
+async def test_title_follows_a_host_changed_by_dhcp(hass, fake_gateway):
+    """DHCP updates the stored host only; the title must not keep the old IP."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Connector Bridge (192.168.1.28)",
+        unique_id=FORMATTED_MAC,
+        data={CONF_HOST: "192.168.1.50", CONF_KEY: "a" * 16},
+    )
+    entry.add_to_hass(hass)
+    with patch(
+        "custom_components.connector_bridge.ConnectorGateway", return_value=fake_gateway
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.title == "Connector Bridge (192.168.1.50)"
+    assert entry.state is ConfigEntryState.LOADED
+
+
+async def test_custom_title_is_kept(hass, fake_gateway):
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Redőnyök",
+        unique_id=FORMATTED_MAC,
+        data={CONF_HOST: "192.168.1.50", CONF_KEY: "a" * 16},
+    )
+    entry.add_to_hass(hass)
+    with patch(
+        "custom_components.connector_bridge.ConnectorGateway", return_value=fake_gateway
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.title == "Redőnyök"
 
 
 async def test_setup_warns_when_no_blinds_are_paired(hass, mock_config_entry, caplog):

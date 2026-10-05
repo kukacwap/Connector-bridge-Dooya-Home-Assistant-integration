@@ -1,6 +1,6 @@
 # Test-only dependencies. pytest-homeassistant-custom-component pins a
 # matching Home Assistant core and pytest, so nothing else needs pinning here.
-pytest-homeassistant-custom-component==0.13.316
+pytest-homeassistant-custom-component==0.13.367
 
 # Declared in manifest.json; installed here so the bridge module imports.
 pycryptodomex==3.21.0

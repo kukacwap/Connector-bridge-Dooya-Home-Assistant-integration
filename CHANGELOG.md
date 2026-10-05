@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.3.5
+
+Home Assistant 2026.9 compatibility, and HomeKit open/close that always acts.
+
+- **Fixed: every blind was unavailable on Home Assistant 2026.9.** Blinds were
+  linked to the bridge device with the `via_device` device info key, which
+  2026.9 deprecated in favour of `via_device_id`. The blinds are added after
+  their first status poll, at which point Home Assistant can no longer tell
+  which integration made the call, so it raised instead of warning and no
+  blind was added ("Error adding entity None for domain cover"). Blinds now
+  link to the bridge by its device registry id; cores before 2026.8, which
+  lack that, keep using the old key.
+- **Fixed: HomeKit could not close a blind the estimate already called closed,
+  or open one it called open.** HomeKit opens and closes by setting the
+  position to 100 or 0, and a target equal to the estimate sent nothing. The
+  estimate of an open/close-only motor is wrong whenever the blind moved
+  without Home Assistant, so fully open and fully closed are now always sent:
+  running into the end stop is harmless and resynchronises the estimate.
+  Partial positions that are already reached are still skipped.
+- **First estimate**: with no position to restore, a stateless blind starts
+  from the last open or close the bridge sent it instead of "closed".
+- **Fixed: the integration title kept showing the bridge's old IP address**
+  after a DHCP discovery updated the stored host.
+- Tests now run against Home Assistant 2026.9.4
+  (`pytest-homeassistant-custom-component` 0.13.367, Python 3.14), including
+  one that adds the blinds the way production does, with deprecated calls
+  raising.
+
 ## 1.3.2
 
 Packaging, so releases reach Home Assistant on their own.

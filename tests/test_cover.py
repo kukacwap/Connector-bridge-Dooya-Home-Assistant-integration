@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from unittest.mock import patch
 
 import pytest
 from homeassistant.components.cover import (
@@ -24,7 +25,9 @@ from homeassistant.const import (
     STATE_UNAVAILABLE,
 )
 from homeassistant.core import State
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import frame
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
@@ -37,7 +40,8 @@ from custom_components.connector_bridge.const import (
     SERVICE_MOVE_FOR_DURATION,
 )
 
-from .conftest import BLIND_MAC, STATELESS_MAC, TRAVEL_TIME
+from .conftest import BLIND_MAC, GATEWAY_MAC, STATELESS_MAC, TRAVEL_TIME
+from .helpers import FakeGateway
 
 POSITIONAL = "cover.blind_0001"
 STATELESS = "cover.blind_0002"
@@ -98,6 +102,64 @@ async def test_friendly_name_is_not_doubled(hass, setup_integration):
     """The cover is its device's primary entity, so it takes the device name."""
     state = hass.states.get(POSITIONAL)
     assert state.attributes[ATTR_FRIENDLY_NAME] == "Blind 0001"
+
+
+async def test_blind_device_is_linked_to_the_bridge(
+    hass, mock_config_entry, patch_gateway, caplog
+):
+    mock_config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    device_registry = dr.async_get(hass)
+    bridge = device_registry.async_get_device_by_identifier(
+        (DOMAIN, GATEWAY_MAC), mock_config_entry.entry_id
+    )
+    blind = device_registry.async_get_device_by_identifier(
+        (DOMAIN, BLIND_MAC), mock_config_entry.entry_id
+    )
+    assert blind.via_device_id == bridge.id
+    assert "deprecated `via_device`" not in caplog.text
+
+
+async def test_blinds_load_when_deprecated_calls_raise(
+    hass, mock_config_entry, patch_gateway, monkeypatch
+):
+    """Reproduce how Home Assistant 2026.9 added the blinds in production.
+
+    When Home Assistant cannot tell which integration made a deprecated call
+    it raises instead of warning. That is what happened to the deprecated
+    ``via_device`` device info key, and no blind could be added.
+    """
+
+    def _unattributable(*args, **kwargs):
+        raise frame.MissingIntegrationFrame
+
+    monkeypatch.setattr(frame, "get_integration_frame", _unattributable)
+    mock_config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.states.get(POSITIONAL).state != STATE_UNAVAILABLE
+    assert hass.states.get(STATELESS).state != STATE_UNAVAILABLE
+
+
+async def test_blind_without_a_bridge_device_is_not_linked(hass, mock_config_entry):
+    """A gateway that never reported its MAC has no device to link to."""
+    gateway = FakeGateway("192.168.1.50", GATEWAY_MAC, {BLIND_MAC: 30})
+    gateway.mac = None
+    mock_config_entry.add_to_hass(hass)
+    with patch(
+        "custom_components.connector_bridge.ConnectorGateway", return_value=gateway
+    ):
+        assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+
+    blind = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, BLIND_MAC), mock_config_entry.entry_id
+    )
+    assert blind.via_device_id is None
+    assert hass.states.get(POSITIONAL) is not None
 
 
 # ----------------------------------------------------------------------
@@ -306,17 +368,61 @@ async def test_stateless_position_to_zero_uses_close(hass, setup_integration, fa
     assert _moves(blind)[-1] == ("close",)
 
 
-async def test_stateless_position_already_reached_sends_nothing(
-    hass, setup_integration, fake_gateway
+async def test_stateless_partial_position_already_reached_sends_nothing(
+    hass, setup_integration, fake_gateway, clock
 ):
     blind = _blind(fake_gateway, STATELESS_MAC)
+    await hass.services.async_call(
+        COVER_DOMAIN,
+        SERVICE_SET_COVER_POSITION,
+        {ATTR_ENTITY_ID: STATELESS, ATTR_POSITION: 50},
+        blocking=True,
+    )
+    await _advance(hass, clock, TRAVEL_TIME / 2 + 1)
+    assert _moves(blind) == [("open",), ("stop",)]
+
+    await hass.services.async_call(
+        COVER_DOMAIN,
+        SERVICE_SET_COVER_POSITION,
+        {ATTR_ENTITY_ID: STATELESS, ATTR_POSITION: 50},
+        blocking=True,
+    )
+    assert _moves(blind) == [("open",), ("stop",)]
+
+
+async def test_stateless_end_positions_are_always_sent(
+    hass, setup_integration, fake_gateway, clock
+):
+    """Closing a blind the estimate already calls closed must still close it.
+
+    HomeKit's open and close arrive here as positions 100 and 0, and the
+    estimate is wrong whenever the blind moved without us (a wall remote), so
+    skipping them left blinds that HomeKit could not close or open at all.
+    """
+    blind = _blind(fake_gateway, STATELESS_MAC)
+    assert hass.states.get(STATELESS).attributes[ATTR_CURRENT_POSITION] == 0
+
     await hass.services.async_call(
         COVER_DOMAIN,
         SERVICE_SET_COVER_POSITION,
         {ATTR_ENTITY_ID: STATELESS, ATTR_POSITION: 0},
         blocking=True,
     )
-    assert _moves(blind) == []
+    assert _moves(blind) == [("close",)]
+    assert hass.states.get(STATELESS).state == CoverState.CLOSED
+
+    await hass.services.async_call(
+        COVER_DOMAIN, SERVICE_OPEN_COVER, {ATTR_ENTITY_ID: STATELESS}, blocking=True
+    )
+    await _advance(hass, clock, TRAVEL_TIME * 1.5)
+    await hass.services.async_call(
+        COVER_DOMAIN,
+        SERVICE_SET_COVER_POSITION,
+        {ATTR_ENTITY_ID: STATELESS, ATTR_POSITION: 100},
+        blocking=True,
+    )
+    assert _moves(blind) == [("close",), ("open",), ("open",)]
+    assert hass.states.get(STATELESS).attributes[ATTR_CURRENT_POSITION] == 100
 
 
 async def test_new_command_cancels_the_pending_stop(
@@ -507,6 +613,40 @@ async def test_position_restored_after_restart(hass, mock_config_entry, patch_ga
     await hass.async_block_till_done()
 
     assert hass.states.get(STATELESS).attributes[ATTR_CURRENT_POSITION] == 65
+
+
+@pytest.mark.parametrize(
+    ("operation", "expected"), [(1, 100), (0, 0), (2, 0), (None, 0)]
+)
+async def test_first_estimate_follows_the_last_bridge_command(
+    hass, mock_config_entry, patch_gateway, operation, expected
+):
+    """With nothing to restore, the bridge's last open/close is the best guess."""
+    patch_gateway.device_list[STATELESS_MAC].operation = operation
+    mock_config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.states.get(STATELESS).attributes[ATTR_CURRENT_POSITION] == expected
+
+
+async def test_restored_position_beats_the_last_bridge_command(
+    hass, mock_config_entry, patch_gateway
+):
+    """A partial position from before the restart is more precise."""
+    from homeassistant.const import STATE_OPEN
+    from pytest_homeassistant_custom_component.common import mock_restore_cache
+
+    mock_restore_cache(
+        hass,
+        (State(STATELESS, STATE_OPEN, {ATTR_CURRENT_POSITION: 40}),),
+    )
+    patch_gateway.device_list[STATELESS_MAC].operation = 1
+    mock_config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.states.get(STATELESS).attributes[ATTR_CURRENT_POSITION] == 40
 
 
 async def test_corrupt_restored_position_is_ignored(hass, mock_config_entry, patch_gateway):

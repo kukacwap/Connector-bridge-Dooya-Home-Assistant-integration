@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from typing import Any
 
 import voluptuous as vol
 
@@ -16,6 +17,7 @@ from homeassistant.components.cover import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_platform
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -77,6 +79,33 @@ _OP_OPEN = 1
 _OP_STOP = 2
 
 
+def _gateway_link(
+    hass: HomeAssistant, entry: ConfigEntry, gateway: ConnectorGateway
+) -> dict[str, Any]:
+    """Return the device info keys that hang a blind off the bridge device.
+
+    Home Assistant 2026.8 added ``via_device_id`` (the bridge's device
+    registry id) and 2026.9 deprecated the old ``via_device`` identifier
+    tuple. When an entity is added after an update, as these are, the
+    deprecated key makes the device registry raise, so no blind could be
+    added at all. The bridge device is registered during setup, before the
+    platforms load, so its id is already available here.
+    """
+    if not gateway.mac:
+        return {}
+    lookup = getattr(dr, "async_get_device_id_by_identifier", None)
+    if lookup is None:
+        # Cores before 2026.8 only understand the identifier form.
+        return {"via_device": (DOMAIN, gateway.mac)}
+    try:
+        device_id = lookup(hass, (DOMAIN, gateway.mac), config_entry_id=entry.entry_id)
+    except ValueError:
+        # Without a registered bridge device the blind is simply not linked;
+        # a dangling reference would make the device registry reject it.
+        return {}
+    return {"via_device_id": device_id}
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -84,12 +113,14 @@ async def async_setup_entry(
 ) -> None:
     gateway: ConnectorGateway = hass.data[DOMAIN][entry.entry_id]
     travel_times: dict = entry.options.get(OPT_TRAVEL_TIMES, {})
+    gateway_link = _gateway_link(hass, entry, gateway)
     entities = [
         ConnectorBridgeCover(
             gateway,
             blind,
             entry,
             float(travel_times.get(blind.mac, DEFAULT_TRAVEL_TIME)),
+            gateway_link,
         )
         for blind in gateway.device_list.values()
     ]
@@ -127,6 +158,7 @@ class ConnectorBridgeCover(CoverEntity, RestoreEntity):
         blind: ConnectorBlind,
         entry: ConfigEntry,
         travel_time: float,
+        gateway_link: dict[str, Any] | None = None,
     ) -> None:
         self._gateway = gateway
         self._blind = blind
@@ -147,7 +179,7 @@ class ConnectorBridgeCover(CoverEntity, RestoreEntity):
             name=f"Blind {blind.mac[-4:]}",
             manufacturer="Dooya",
             model=model_name(blind.device_type),
-            via_device=(DOMAIN, gateway.mac or ""),
+            **(gateway_link or {}),
         )
 
         # Position control is always offered: motors that report a position
@@ -177,8 +209,17 @@ class ConnectorBridgeCover(CoverEntity, RestoreEntity):
             if pos is not None:
                 try:
                     self._travel.set_position(float(pos))
+                    return
                 except (TypeError, ValueError):
                     pass
+
+        # Nothing to restore (first start, or the blind was unavailable when
+        # Home Assistant stopped). The bridge remembers the last command it
+        # sent, which beats assuming every blind is closed.
+        if self._blind.operation == _OP_OPEN:
+            self._travel.set_position(100)
+        elif self._blind.operation == _OP_CLOSE:
+            self._travel.set_position(0)
 
     async def async_will_remove_from_hass(self) -> None:
         self._stop_travel_updates()
@@ -369,7 +410,12 @@ class ConnectorBridgeCover(CoverEntity, RestoreEntity):
 
         current = self._travel.current_position()
         distance = ha_pos - current
-        if abs(distance) < 1:
+        # Fully open and fully closed are always sent: HomeKit opens and
+        # closes through this method, and the estimate can be wrong (a wall
+        # remote, a power cut), so "already there" may not be true. Running
+        # a motor into its end stop is harmless and resynchronises the
+        # estimate. Only a partial move that is already reached is skipped.
+        if abs(distance) < 1 and 0 < ha_pos < 100:
             return
 
         self._travel.start_travel(ha_pos)
